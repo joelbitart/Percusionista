@@ -1,0 +1,529 @@
+
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>¡Percusionista! — Tambores Callejeros del Perú</title>
+<style>
+  html,body{margin:0;height:100%;background:#1a0e08;overflow:hidden;font-family:monospace}
+  #wrap{display:flex;align-items:center;justify-content:center;height:100vh}
+  canvas{image-rendering:pixelated;max-width:100vw;max-height:100vh}
+</style>
+</head>
+<body>
+<div id="wrap"><canvas id="game" width="640" height="360"></canvas></div>
+<script>
+// ============ PERCUSSIONISTA! ============
+const cv = document.getElementById('game'), ctx = cv.getContext('2d');
+ctx.imageSmoothingEnabled = false;
+const W = 640, H = 360;
+const GRAV = 0.5, MOVE = 2.6;
+// drum upgrade ladder: bigger drum = higher jump
+const JUMPS = [10.5, 11.6, 12.8];
+const DRUM_NAMES = ['CAJÓN', 'CAJÓN GRANDE', 'BOMBO'];
+
+// ---------- Audio (chip drums!) ----------
+let AC = null;
+function ac(){ if(!AC) AC = new (window.AudioContext||window.webkitAudioContext)(); return AC; }
+function noiseBurst(dur, freq, vol){ // cajón / snare hit
+  try{
+    const a = ac(), len = a.sampleRate*dur, buf = a.createBuffer(1,len,a.sampleRate), d = buf.getChannelData(0);
+    for(let i=0;i<len;i++) d[i]=(Math.random()*2-1)*Math.pow(1-i/len,2);
+    const src=a.createBufferSource(); src.buffer=buf;
+    const f=a.createBiquadFilter(); f.type='lowpass'; f.frequency.value=freq;
+    const g=a.createGain(); g.gain.value=vol;
+    src.connect(f); f.connect(g); g.connect(a.destination); src.start();
+  }catch(e){}
+}
+function beep(freq,dur,vol,type){
+  try{
+    const a=ac(), o=a.createOscillator(), g=a.createGain();
+    o.type=type||'square'; o.frequency.value=freq;
+    g.gain.setValueAtTime(vol,a.currentTime); g.gain.exponentialRampToValueAtTime(0.001,a.currentTime+dur);
+    o.connect(g); g.connect(a.destination); o.start(); o.stop(a.currentTime+dur);
+  }catch(e){}
+}
+function sfxJump(){ beep(300,.12,.12,'square'); beep(450,.1,.1,'square'); }
+function sfxStomp(){ noiseBurst(.18, 900, .5); beep(150,.15,.2,'sine'); }
+function sfxHurt(){ noiseBurst(.3, 500, .5); beep(110,.3,.25,'sawtooth'); }
+function sfxCoin(){ beep(880,.08,.15); setTimeout(()=>beep(1320,.15,.15),70); }
+function sfxWin(){ [523,659,784,1046].forEach((f,i)=>setTimeout(()=>beep(f,.25,.2),i*180)); }
+
+// festejo: Afro-Peruvian 12/8 groove (sixths of a bar) — used throughout
+let musicOn = true, musicTimer = null, mStep = 0;
+function festejoTick(){
+  if(!musicOn) return;
+  if([0,3,6,8,11].includes(mStep%12)) noiseBurst(.09,800,.25); // cajón groove
+  if(mStep%6===0) noiseBurst(.15,250,.4);                      // bombo boom
+  if([2,5,9].includes(mStep%12)) beep(1046,.09,.12,'square');  // criolla bell
+  const notes=[523,587,659,784,880];
+  if([0,4,7,10].includes(mStep%12)) beep(notes[(mStep/4|0)%4],.18,.07,'triangle');
+  mStep++;
+}
+function startMusic(){ if(musicTimer) return; musicTimer = setInterval(festejoTick, 140); }
+function stopMusic(){ clearInterval(musicTimer); musicTimer=null; }
+
+// ---------- Level ----------
+// tiles: G ground, B brick, P platform, S crate, D drum block (bump!), U used block
+const MAPW = 220, MAPH = 18, TS = 20;
+const map = [];
+for(let x=0;x<MAPW;x++){ map[x]=[]; for(let y=0;y<MAPH;y++) map[x][y]=' '; }
+for(let x=0;x<MAPW;x++) for(let y=15;y<MAPH;y++) map[x][y]='G';
+function rect(x0,y0,x1,y1,t){ for(let x=x0;x<x1;x++) for(let y=y0;y<y1;y++) if(map[x]) map[x][y]=t; }
+// ground variation
+rect(40,13,44,15,'G'); rect(60,12,63,15,'G'); rect(90,13,93,15,'G');
+rect(120,11,126,15,'G'); rect(150,13,154,15,'G'); rect(175,12,180,15,'G');
+// bricks & platforms
+rect(10,11,14,12,'B'); rect(24,9,28,10,'B'); rect(50,10,55,11,'B');
+rect(70,8,75,9,'P'); rect(84,11,88,12,'B'); rect(100,9,104,10,'P');
+rect(112,12,116,13,'B'); rect(132,8,140,9,'P'); rect(144,12,148,13,'B');
+rect(160,9,164,10,'B'); rect(185,10,192,11,'P'); rect(200,11,205,12,'B');
+// drum blocks (bump from below to pop out drum sticks!)
+[[15,11],[27,9],[53,10],[73,8],[86,11],[102,9],[114,12],[135,8],[146,12],[162,9],[187,10],[202,11],[64,12],[96,12],[140,12],[177,11]]
+  .forEach(([x,y])=>map[x][y]='D');
+// crates
+rect(36,14,38,15,'S'); rect(105,14,107,15,'S'); rect(168,14,170,15,'S');
+// coins
+const coins=[];
+function coin(x,y){ coins.push({x:x*TS+6,y:y*TS+4,got:false,bob:Math.random()*6}); }
+for(let x=11;x<14;x++) coin(x,10);
+for(let x=25;x<28;x++) coin(x,8);
+for(let x=51;x<55;x++) coin(x,9);
+for(let x=71;x<75;x++) coin(x,7);
+for(let x=101;x<104;x++) coin(x,8);
+for(let x=133;x<140;x++) coin(x,7);
+for(let x=161;x<164;x++) coin(x,8);
+for(let x=186;x<192;x++) coin(x,9);
+for(let x=45;x<48;x++) coin(x,12);
+for(let x=155;x<158;x++) coin(x,12);
+
+// enemies (police) — patrol between bounds
+const cops=[
+  {x:30,y:13.4,dir:1,min:26,max:38},
+  {x:56,y:13.4,dir:-1,min:50,max:62},
+  {x:78,y:13.4,dir:1,min:70,max:88},
+  {x:96,y:13.4,dir:-1,min:92,max:106},
+  {x:116,y:13.4,dir:1,min:110,max:124},
+  {x:138,y:13.4,dir:-1,min:130,min2:0,max:146},
+  {x:158,y:13.4,dir:1,min:152,max:166},
+  {x:184,y:13.4,dir:-1,min:178,max:196},
+  {x:200,y:13.4,dir:1,min:196,max:210},
+];
+cops.forEach(c=>{ c.px=c.x*TS; c.py=c.y*TS; c.w=18;c.h=26; c.stunned=0; c.alive=true; c.vy=0; });
+
+// ---------- Drum sticks (pop out of drum blocks) ----------
+const sticks=[]; // {x,y,vy,settled}
+const darts=[];  // thrown sticks {x,y,vx,vy}
+const P = { x:40, y:200, vx:0, vy:0, w:14, h:22, onG:false, face:1, lives:3, inv:0, anim:0, drumming:0, drumLv:0, stickCount:0, throwCd:0 };
+
+
+
+// ---------- State ----------
+let state='title'; // title | play | dead | win
+let score=0, camX=0, t=0, flash=0, msg='', msgT=0;
+const GOAL_X = (MAPW-4)*TS;
+
+const keys={};
+addEventListener('keydown',e=>{
+  keys[e.code]=true;
+  if(['ArrowLeft','ArrowRight','ArrowUp','Space'].includes(e.code)) e.preventDefault();
+  if(state==='title' && (e.code==='Space'||e.code==='Enter')) startGame();
+  else if((state==='dead'||state==='win') && (e.code==='Space'||e.code==='Enter')) startGame();
+  if(state==='play' && e.code==='KeyX') throwStick();
+});
+
+function throwStick(){
+  if(P.drumLv<2 || P.stickCount<=0 || P.throwCd>0) return;
+  P.stickCount--; P.throwCd=18; P.drumming=10;
+  darts.push({x:P.x+P.w/2+(P.face>0?8:-12), y:P.y+6, vx:P.face*7, vy:-3});
+  noiseBurst(.1,1400,.4);
+}
+addEventListener('keyup',e=>keys[e.code]=false);
+cv.addEventListener('pointerdown',()=>{ if(state!=='play') startGame(); });
+
+function startGame(){
+  ac(); startMusic();
+  P.x=40; P.y=180; P.vx=0; P.vy=0; P.lives=3; P.inv=60;
+  P.drumLv=0; P.stickCount=0; P.throwCd=0;
+  score=0; camX=0;
+  darts.length=0;
+  coins.forEach(c=>c.got=false);
+  sticks.length=0;
+  // reset drum blocks
+  for(let x=0;x<MAPW;x++) for(let y=0;y<MAPH;y++) if(map[x][y]==='U') map[x][y]='D';
+  cops.forEach(c=>{ c.px=c.x*TS; c.py=c.y*TS; c.alive=true; c.stunned=0; c.dir=Math.random()<.5?1:-1; c.vy=0; });
+  state='play';
+}
+
+function solid(tx,ty){
+  if(tx<0||tx>=MAPW) return true;
+  if(ty>=MAPH) return false;
+  if(ty<0) return false;
+  const c=map[tx][ty];
+  return c==='G'||c==='B'||c==='P'||c==='S'||c==='D'||c==='U';
+}
+
+const bumps=[]; // block bounce animations {tx,ty,timer}
+function bumpDrumBlocks(rising){
+  if(!rising) return;
+  const ty=Math.floor(P.y/TS)-1;   // the tile ABOVE the (snapped) head = the block we bonked
+  if(ty<0||ty>=MAPH) return;
+  const hits=[];
+  for(const tx of [Math.floor((P.x+3)/TS), Math.floor((P.x+P.w-3)/TS)]){
+    if(tx>=0&&tx<MAPW&&map[tx][ty]==='D') hits.push([tx,ty]);
+  }
+  for(const [tx,ty2] of hits){
+    map[tx][ty2]='U';
+    bumps.push({tx,ty:ty2,timer:12});
+    sticks.push({x:tx*TS+4, y:(ty2-1)*TS+2, vy:-5, vx:(tx%2?2.4:-2.4), settled:false});
+    score+=20; sfxStomp(); P.drumming=14;
+  }
+}
+
+function update(){
+  t++;
+  if(state!=='play'){ return; }
+  // input
+  let ax=0;
+  if(keys.ArrowLeft||keys.KeyA) ax=-1;
+  if(keys.ArrowRight||keys.KeyD) ax=1;
+  P.vx = ax*MOVE;
+  if(ax) P.face=ax;
+  if((keys.ArrowUp||keys.Space||keys.KeyW) && P.onG){ P.vy=-JUMPS[P.drumLv]; P.onG=false; sfxJump(); P.drumming=14; }
+  P.vy += GRAV; if(P.vy>12) P.vy=12;
+
+  // move X with collision
+  P.x += P.vx;
+  if(P.x<0) P.x=0;
+  if(P.vx>0){
+    if(solid(Math.floor((P.x+P.w)/TS), Math.floor((P.y+4)/TS)) || solid(Math.floor((P.x+P.w)/TS), Math.floor((P.y+P.h-4)/TS))){
+      P.x = Math.floor((P.x+P.w)/TS)*TS - P.w - 0.1; P.vx=0;
+    }
+  } else if(P.vx<0){
+    if(solid(Math.floor(P.x/TS), Math.floor((P.y+4)/TS)) || solid(Math.floor(P.x/TS), Math.floor((P.y+P.h-4)/TS))){
+      P.x = (Math.floor(P.x/TS)+1)*TS + 0.1; P.vx=0;
+    }
+  }
+  // move Y with collision
+  const rising = P.vy < 0;   // remember BEFORE we zero it
+  P.y += P.vy; P.onG=false;
+  if(P.vy>=0){
+    if(solid(Math.floor((P.x+3)/TS), Math.floor((P.y+P.h)/TS)) || solid(Math.floor((P.x+P.w-3)/TS), Math.floor((P.y+P.h)/TS))){
+      P.y = Math.floor((P.y+P.h)/TS)*TS - P.h; P.vy=0; P.onG=true;
+    }
+  } else {
+    if(solid(Math.floor((P.x+3)/TS), Math.floor(P.y/TS)) || solid(Math.floor((P.x+P.w-3)/TS), Math.floor(P.y/TS))){
+      P.y = (Math.floor(P.y/TS)+1)*TS + 0.1; P.vy=0;
+      bumpDrumBlocks(rising);
+    }
+  }
+  if(P.y>H+60) hurt(true);
+
+  // coins
+  for(const c of coins){
+    c.bob+=0.1;
+    if(!c.got && Math.abs(c.x+7-(P.x+P.w/2))<14 && Math.abs(c.y+8-(P.y+P.h/2))<18){
+      c.got=true; score+=10; sfxCoin();
+    }
+  }
+
+  // drum block bounce animations
+  for(let i=bumps.length-1;i>=0;i--){ if(--bumps[i].timer<=0) bumps.splice(i,1); }
+
+  // drum sticks fall & get collected
+  for(let i=sticks.length-1;i>=0;i--){
+    const s=sticks[i];
+    if(!s.settled){
+      s.x += s.vx||0;
+      s.y+=s.vy; s.vy+=0.3;
+      const tx=Math.floor((s.x+5)/TS), ty=Math.floor((s.y+14)/TS);
+      if(ty<MAPH && solid(tx,ty)){ s.y=ty*TS-14; s.vy=0; s.settled=true; }
+    }if(Math.abs(s.x+5-(P.x+P.w/2))<14 && Math.abs(s.y+7-(P.y+P.h/2))<18){
+      sticks.splice(i,1); P.stickCount++; sfxCoin(); beep(660,.15,.15);
+      // upgrade: 2 sticks -> lv1, 5 total -> lv2
+      if((P.drumLv===0&&P.stickCount>=2)||(P.drumLv===1&&P.stickCount>=5)){
+        P.drumLv++; sfxWin(); msg='¡MEJORASTE EL TAMBOR: '+DRUM_NAMES[P.drumLv]+'!'; msgT=120;
+      }
+      score+=30;
+    }
+  }
+  if(msgT>0) msgT--;
+
+  // thrown sticks
+  for(let i=darts.length-1;i>=0;i--){
+    const d=darts[i];
+    d.x+=d.vx; d.y+=d.vy; d.vy+=0.25;
+    if(Math.random()<.5) noiseBurst(.03,2000,.05); // whizz
+    let gone = d.x<camX-40 || d.x>camX+W+40 || d.y>H+40;
+    if(!gone && solid(Math.floor((d.x+2)/TS), Math.floor(d.y/TS))){ gone=true; noiseBurst(.06,900,.2); }
+    // hits cops
+    if(!gone) for(const c of cops){
+      if(c.alive && Math.abs(c.px-d.x)<16 && Math.abs(c.py+13-d.y)<26){
+        c.alive=false; c.vy=-5; gone=true; score+=80; sfxStomp(); P.drumming=10;
+        break;
+      }
+    }
+    if(gone) darts.splice(i,1);
+  }
+  if(P.throwCd>0) P.throwCd--;
+  for(const c of cops){
+    if(!c.alive){
+      // knocked out: little hop, then fall off screen
+      c.vy += GRAV; c.py += c.vy;
+      continue;
+    }
+    if(c.stunned>0){ c.stunned--; continue; }
+    c.px += c.dir*0.9;
+    if(c.px/TS < c.min || c.px/TS > c.max) c.dir*=-1;
+    // collision with player
+    if(Math.abs(c.px-(P.x+P.w/2))<16 && Math.abs(c.py-(P.y+P.h/2))<22){
+      if(P.vy>1 && P.y < c.py-6){
+        c.stunned=90; c.alive=false; c.vy=-6; P.vy=-8; score+=50; sfxStomp();
+      } else if(P.inv<=0){
+        hurt();
+      }
+    }
+  }
+
+  if(P.inv>0) P.inv--;
+  if(P.drumming>0) P.drumming--;
+  if(flash>0) flash--;
+
+  // camera
+  camX = Math.max(0, Math.min(P.x - W/2 + 40, MAPW*TS - W));
+
+  // goal — festejo orchestra waits here
+  if(P.x > GOAL_X){ state='win'; sfxWin(); }
+}
+
+function hurt(pit){
+  if(P.inv>0 && !pit) return;
+  // big bombo absorbs one hit (drops a level)
+  if(!pit && P.drumLv>=2){ P.drumLv=1; P.inv=90; flash=10; sfxStomp(); msg='¡TU BOMBO SE ROMPIÓ!'; msgT=100; return; }
+  P.lives--; P.inv=90; flash=15; sfxHurt();
+  if(P.lives<=0){ state='dead'; stopMusic(); }
+  else if(!pit){ P.y-=10; P.vy=-7; }
+  else { P.x=Math.max(40,P.x-80); P.y=100; P.vy=0; }
+}
+
+// ---------- Drawing (pixel art) ----------
+function px(x,y,w,h,col){ ctx.fillStyle=col; ctx.fillRect(Math.round(x),Math.round(y),w,h); }
+
+function drawBg(){
+  // sky: Andean dusk
+  const g=ctx.createLinearGradient(0,0,0,H);
+  g.addColorStop(0,'#2c4a7c'); g.addColorStop(.55,'#b56b4a'); g.addColorStop(1,'#e8a05c');
+  ctx.fillStyle=g; ctx.fillRect(0,0,W,H);
+  // sun
+  px(W-120-camX*0.05%60, 40, 34, 34, '#ffe9b0');
+  // mountains (parallax)
+  ctx.fillStyle='#6b4a63';
+  for(let i=0;i<8;i++){
+    const mx=((i*160 - camX*0.25)%(W+320)+W+320)%(W+320)-160;
+    ctx.beginPath(); ctx.moveTo(mx-80,240); ctx.lineTo(mx,110); ctx.lineTo(mx+80,240); ctx.fill();
+  }
+  ctx.fillStyle='#8a5f6e';
+  for(let i=0;i<8;i++){
+    const mx=((i*140+70 - camX*0.45)%(W+280)+W+280)%(W+280)-140;
+    ctx.beginPath(); ctx.moveTo(mx-70,250); ctx.lineTo(mx,150); ctx.lineTo(mx+70,250); ctx.fill();
+  }
+  // colonial buildings (parallax)
+  for(let i=0;i<40;i++){
+    const bx=(i*90 - camX*0.7); if(bx<-120||bx>W+20) continue;
+    const bh=70+((i*37)%60), colr=['#c9564a','#d99e4a','#7a9e7e','#4a7a9e','#b07a9e'][i%5];
+    px(bx, 240-bh, 70, bh, colr);
+    px(bx, 240-bh, 70, 8, '#8a3a30');
+    for(let wy=0; wy<bh-20; wy+=18) for(let wx=0; wx<60; wx+=22)
+      px(bx+8+wx, 252-bh+wy, 12, 10, '#2c2c3a');
+    px(bx+26,240-bh+20,14,16,'#3a2c20'); // door
+  }
+}
+
+function drawTiles(){
+  const x0=Math.floor(camX/TS), x1=x0+Math.ceil(W/TS)+1;
+  for(let x=x0;x<x1;x++) for(let y=0;y<MAPH;y++){
+    if(x<0||x>=MAPW) continue;
+    const c=map[x][y]; if(c===' ') continue;
+    const bump=bumps.find(b=>b.tx===x&&b.ty===y);
+    const off = bump ? -Math.sin((12-bump.timer)/12*Math.PI)*8 : 0;
+    const sx=x*TS-camX, sy=y*TS+off;
+    if(c==='G'){ px(sx,sy,TS,TS,'#9e6b3f'); px(sx,sy,TS,4,'#c9915a'); px(sx,sy+TS-3,TS,3,'#6e4426');
+      if((x+y)%2===0) px(sx+4,sy+8,3,3,'#7a5230'); }
+    else if(c==='D'){ // drum block: wood with drum head
+      px(sx,sy,TS,TS,'#7a4a22'); px(sx,sy,TS,3,'#a8733a'); px(sx,sy+TS-2,TS,2,'#4a2c10');
+      px(sx+4,sy+4,12,12,'#e8d8b0'); px(sx+4,sy+4,12,2,'#c9b888');
+      px(sx+7,sy+8,6,3,'#5a3a18'); px(sx+6,sy+7,8,1,'#5a3a18');
+    }
+    else if(c==='U'){ px(sx,sy,TS,TS,'#5a3a1a'); px(sx,sy,TS,3,'#6e4a26'); }
+    else if(c==='B'){ px(sx,sy,TS,TS,'#a8632f'); px(sx,sy,TS,3,'#d08a4a'); px(sx+9,sy+3,2,TS-3,'#7a4520'); }
+    else if(c==='P'){ px(sx,sy,TS,TS,'#4a8a6e'); px(sx,sy,TS,4,'#6eb892'); }
+    else if(c==='S'){ px(sx,sy,TS,TS,'#8a5a2a'); px(sx+2,sy+2,TS-4,TS-4,'#c9914a'); px(sx,sy+8,TS,3,'#5a3a18'); }
+  }
+}
+
+function drawCoins(){
+  for(const c of coins){
+    if(c.got) continue;
+    const sx=c.x-camX, sy=c.y+Math.sin(c.bob)*2;
+    if(sx<-20||sx>W) continue;
+    px(sx+4,sy,8,12,'#e8c040'); px(sx+6,sy+2,4,8,'#ffe980'); px(sx+4,sy,8,3,'#fff4c0');
+  }
+}
+
+function drawStick(s){
+  const sx=s.x-camX, sy=s.y;
+  if(sx<-20||sx>W) return;
+  px(sx+4,sy,3,12,'#c98a4a');   // stick shaft
+  px(sx+3,sy,5,4,'#e8c040');    // tip
+}
+
+function drawDrummer(x,y,face,anim,onG,drumming){
+  // body: PURPLE poncho player
+  px(x,y+4,14,14,'#7a3a9e');            // poncho
+  px(x,y+4,14,3,'#e8d040');             // poncho stripe
+  px(x+2,y+6,10,3,'#e8d040');
+  px(x+3,y,8,6,'#e8b088');              // head
+  px(x+3+(face>0?3:0),y+2,2,2,'#2c1a0a'); // eye
+  px(x+1,y-2,11,3,'#1a1a1a');           // black hat brim
+  px(x+3,y-5,7,4,'#1a1a1a');            // black hat crown
+  px(x+4,y-6,5,1,'#2c2c2c');
+  // legs
+  const walk = onG&&Math.abs(P.vx)>0 ? Math.sin(anim*0.3)*3 : 0;
+  px(x+2,y+18,4,4+(walk>0?2:0),'#3a2c1a');
+  px(x+8,y+18,4,4+(walk<0?2:0),'#3a2c1a');
+  // drum strapped — grows with level!
+  const dx = face>0 ? 10 : -P.drumLv*3-4;
+  const dw = 8 + P.drumLv*4, dh = 9 + P.drumLv*2;
+  px(x+dx,y+12-dh+9,dw,dh,'#7a4a22');
+  px(x+dx,y+12-dh+9,dw,2,'#a86a32');
+  if(P.drumLv>=2){ px(x+dx+1,y+12-dh+12,dw-2,dh-5,'#e8d8b0'); } // bombo head
+  if(drumming>0){ // drum-hit sparkle
+    px(x+(face>0?dw+9:-9),y+6,3,3,'#ffe980');
+    noiseBurst(.05,600,.05);
+  }
+}
+
+function drawCop(c){
+  if(!c.alive && c.py>H+40) return; // fell off screen already
+  const sx=c.px-camX-9, sy=c.py;
+  if(sx<-30||sx>W+30) return;
+  if(!c.alive){ // knocked out, spinning as it falls
+    ctx.save(); ctx.translate(sx+9, sy+26); ctx.rotate(t*0.2); ctx.translate(-9,-26);
+    px(0,4,18,14,'#2c3e6e'); px(4,0,10,6,'#e8b088'); px(0,0,18,4,'#1a2a4e');
+    ctx.restore(); return;
+  }
+  const bob = Math.sin(t*0.15)*1;
+  px(sx,sy+4+bob,18,15,'#2c3e6e');       // uniform
+  px(sx,sy+4+bob,18,3,'#1a2a4e');
+  px(sx+2,sy+7+bob,14,2,'#e8d040');      // badge stripe
+  px(sx+5,sy-1+bob,9,6,'#e8b088');       // head
+  px(sx+3,sy-3+bob,13,3,'#1a2a4e');      // cap
+  px(sx+7,sy-6+bob,6,3,'#1a2a4e');       // cap peak
+  px(sx+9,sy+1+bob,2,2,'#2c1a0a');
+  px(sx+3,sy+19+bob,5,7,'#1a2a4e');      // legs
+  px(sx+10,sy+19+bob,5,7,'#1a2a4e');
+  px(sx+11,sy+8+bob,7,3,'#333');         // baton arm
+  if(c.stunned>0){ px(sx+2,sy-8,4,4,'#ffe980'); px(sx+12,sy-8,4,4,'#ffe980'); }
+}
+
+function drawDart(d){
+  const sx=d.x-camX, sy=d.y;
+  if(sx<-20||sx>W+20) return;
+  px(sx,sy,6,3,'#c98a4a'); px(sx+(P.face>0?6:0),sy,3,3,'#e8c040');
+}
+
+function drawOrchestra(){
+  // festejo orchestra at the end: cajón, guitar, quijada players
+  const bx=GOAL_X-camX+60;
+  if(bx<-200||bx>W+220) return;
+  const gy=270;
+  const wave=Math.sin(t*0.12);
+  // cajón player
+  px(bx,gy-6,16,6,'#8a5a2a'); px(bx,gy-16+wave,10,10,'#e8b088'); px(bx-2,gy-19+wave,14,3,'#1a1a1a');
+  px(bx+8,gy-12,8,7,'#b04ad9');
+  // guitar player
+  px(bx+34,gy-8,16,8,'#7a3a9e'); px(bx+40,gy-18+wave,10,10,'#e8b088'); px(bx+38,gy-21+wave,14,3,'#1a1a1a');
+  px(bx+30,gy-14,26,4,'#c9914a'); px(bx+48,gy-16,8,8,'#e8c040');
+  // quijada (donkey jaw) player + cajita
+  px(bx+70,gy-7,16,7,'#d94141'); px(bx+76,gy-17+wave,10,10,'#8a5a3a'); px(bx+74,gy-20+wave,14,3,'#1a1a1a');
+  px(bx+64,gy-14,10,5,'#e8d8b0');
+  // banner
+  px(bx-6,gy-58,110,14,'#d94141');
+  ctx.fillStyle='#fff'; ctx.font='bold 10px monospace'; ctx.fillText('FIESTA!', bx+18, gy-48);
+}
+
+function drawGoal(){
+  const sx=GOAL_X-camX;
+  if(sx<-60||sx>W+60) return;
+  // giant bombo + flag = goal
+  px(sx-10,270,40,30,'#8a5a2a'); px(sx-10,270,40,6,'#a86a32');
+  px(sx-4,276,28,18,'#c9914a');
+  px(sx+30,190,3,110,'#6e4426');
+  px(sx+33,190,34,22,'#d94141'); px(sx+33,196,34,4,'#ffffff');
+  ctx.fillStyle='#fff'; ctx.font='10px monospace'; ctx.fillText('META', sx+38, 205);
+}
+
+function drawHUD(){
+  ctx.fillStyle='rgba(0,0,0,0.45)'; ctx.fillRect(0,0,W,28);
+  ctx.fillStyle='#ffe9b0'; ctx.font='bold 14px monospace';
+  ctx.fillText('PUNTOS '+score, 12, 19);
+  // hearts
+  for(let i=0;i<P.lives;i++){
+    px(W-30-i*20, 8, 12, 11, '#d94141');
+    px(W-27-i*20, 5, 6, 4, '#d94141');
+  }
+  // drum sticks + drum level meter
+  px(W-150,6,4,12,'#c98a4a'); px(W-151,6,6,3,'#e8c040');
+  ctx.fillStyle='#ffe9b0'; ctx.fillText('×'+P.stickCount, W-142, 18);
+  ctx.fillStyle='#e8c040'; ctx.fillText(DRUM_NAMES[P.drumLv], W-100, 18);
+  if(msgT>0){ center(msg, 44, '#ffe980', 'bold 16px'); }
+}
+
+function center(text,y,col,size){
+  ctx.fillStyle=col||'#fff'; ctx.font=(size||'bold 20px')+' monospace';
+  ctx.textAlign='center';
+  ctx.fillText(text, W/2, y);
+  ctx.textAlign='left';
+}
+
+function draw(){
+  drawBg(); drawTiles(); drawCoins(); for(const s of sticks) drawStick(s); for(const d of darts) drawDart(d); drawGoal(); drawOrchestra();
+  for(const c of cops) drawCop(c);
+  if(state==='play'||state==='dead') drawDrummer(P.x-camX, P.y, P.face, P.anim, P.onG, P.drumming);
+  if(flash>0){ ctx.fillStyle='rgba(255,80,80,'+(flash/40)+')'; ctx.fillRect(0,0,W,H); }
+  drawHUD();
+
+  if(state==='title'){
+    ctx.fillStyle='rgba(10,5,20,0.72)'; ctx.fillRect(0,0,W,H);
+    center('PERCUSIONISTA!', 92, '#e8c040', 'bold 34px');
+    center('Tambores Callejeros del Perú', 118, '#fff', '16px');
+    center('Tocas cajón en la esquina.', 160, '#e8b088', '14px');
+    center('La policía te quiere FUERA.', 178, '#e8b088', '14px');
+    center('← → mover   ↑ / ESPACIO saltar', 210, '#fff', '14px');
+    center('¡Golpea los BLOQUES DE TAMBOR por abajo para sacar baquetas!', 244, '#e8c040', '14px');
+    center('Junta baquetas para mejorar: CAJÓN → GRANDE → BOMBO.', 260, '#fff', '13px');
+    center('Con el BOMBO, aprieta X para lanzar baquetas a los policías!', 276, '#e8b088', '13px');
+    center('¡Llega a la orquesta de festejo al final!', 292, '#e8c040', '13px');
+    center('APRIETA ESPACIO PARA JUGAR', 310, '#e8c040', 'bold 18px');
+  }
+  if(state==='dead'){
+    ctx.fillStyle='rgba(10,5,20,0.72)'; ctx.fillRect(0,0,W,H);
+    center('¿QUÉ HACES, CONCHA TU MARE!', 150, '#d94141', 'bold 26px');
+    center('Puntos: '+score, 185, '#fff', '18px');
+    center('APRIETA ESPACIO PARA INTENTAR OTRA VEZ', 225, '#e8c040', 'bold 16px');
+  }
+  if(state==='win'){
+    ctx.fillStyle='rgba(10,5,20,0.72)'; ctx.fillRect(0,0,W,H);
+    center('EL RITMO NO SE DETIENE!', 140, '#e8c040', 'bold 26px');
+    center('¡Llegaste a la orquesta de festejo!', 168, '#fff', '16px');
+    center('Te estaban esperando para tocar. ¡FIESTA!', 186, '#e8b088', '14px');
+    center('Puntos finales: '+score, 200, '#fff', '18px');
+    center('APRIETA ESPACIO PARA JUGAR OTRA VEZ', 240, '#e8c040', 'bold 16px');
+  }
+}
+
+function loop(){ update(); draw(); P.anim++; requestAnimationFrame(loop); }
+loop();
+</script>
+</body>
+</html>
