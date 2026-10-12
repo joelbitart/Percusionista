@@ -20,7 +20,7 @@ const W = 640, H = 360;
 const GRAV = 0.5, MOVE = 2.6;
 // drum upgrade ladder: bigger drum = higher jump
 const JUMPS = [10.5, 11.6, 12.8];
-const DRUM_NAMES = ['CAJÓN', 'CAJÓN GRANDE', 'BOMBO'];
+const DRUM_NAMES = ['CAJÓN', 'NAPO', 'BOMBO'];
 
 // ---------- Audio (chip drums!) ----------
 let AC = null;
@@ -501,21 +501,21 @@ function draw(){
     center('La policía te quiere FUERA.', 178, '#e8b088', '14px');
     center('← → mover   ↑ / ESPACIO saltar', 210, '#fff', '14px');
     center('¡Golpea los BLOQUES DE TAMBOR por abajo para sacar baquetas!', 244, '#e8c040', '14px');
-    center('Junta baquetas para mejorar: CAJÓN → GRANDE → BOMBO.', 260, '#fff', '13px');
+    center('Junta baquetas para mejorar: CAJÓN → NAPO → BOMBO.', 260, '#fff', '13px');
     center('Con el BOMBO, aprieta X para lanzar baquetas a los policías!', 276, '#e8b088', '13px');
     center('¡Llega a la orquesta de festejo al final!', 292, '#e8c040', '13px');
     center('APRIETA ESPACIO PARA JUGAR', 310, '#e8c040', 'bold 18px');
   }
   if(state==='dead'){
     ctx.fillStyle='rgba(10,5,20,0.72)'; ctx.fillRect(0,0,W,H);
-    center('¿QUÉ HACES, CONCHA TU MARE!', 150, '#d94141', 'bold 26px');
+    center('CONCHA TU MARE!!!', 150, '#d94141', 'bold 26px');
     center('Puntos: '+score, 185, '#fff', '18px');
     center('APRIETA ESPACIO PARA INTENTAR OTRA VEZ', 225, '#e8c040', 'bold 16px');
   }
   if(state==='win'){
     ctx.fillStyle='rgba(10,5,20,0.72)'; ctx.fillRect(0,0,W,H);
     center('EL RITMO NO SE DETIENE!', 140, '#e8c040', 'bold 26px');
-    center('¡Llegaste a la orquesta de festejo!', 168, '#fff', '16px');
+    center('¡Llegaste a tu orquesta!', 168, '#fff', '16px');
     center('Te estaban esperando para tocar. ¡FIESTA!', 186, '#e8b088', '14px');
     center('Puntos finales: '+score, 200, '#fff', '18px');
     center('APRIETA ESPACIO PARA JUGAR OTRA VEZ', 240, '#e8c040', 'bold 16px');
