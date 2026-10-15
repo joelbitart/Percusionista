@@ -56,7 +56,7 @@ function festejoTick(){
   if([0,3,6,8,11].includes(mStep%12)) noiseBurst(.09,800,.25); // cajón groove
   if(mStep%6===0) noiseBurst(.15,250,.4);                      // bombo boom
   if([2,5,9].includes(mStep%12)) beep(1046,.09,.12,'square');  // criolla bell
-  const notes=[523,587,659,784,880];
+  const notes=[A5:2, A5:2, G5:2, E5:2, D5:4, E5:2, G5:2, A5:2, ., C6:2, B5:2, A5:2, G5:4, E5:2, G5:2, A5:2, ., E5:2, D5:2, C5:2, D5:4, .:2, A4:2, C5:2, D5:2, E5:2, G5:4, E5:2, D5:2, C5:2, A4:4];
   if([0,4,7,10].includes(mStep%12)) beep(notes[(mStep/4|0)%4],.18,.07,'triangle');
   mStep++;
 }
