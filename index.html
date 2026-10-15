@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="es">
 <head>
@@ -6,26 +5,34 @@
 <title>¡Percusionista! — Tambores Callejeros del Perú</title>
 <style>
   html,body{margin:0;height:100%;background:#1a0e08;overflow:hidden;font-family:monospace}
-  #wrap{display:flex;align-items:center;justify-content:center;height:100vh}
-  canvas{image-rendering:pixelated;max-width:100vw;max-height:100vh}
+  #wrap{display:flex;align-items:center;justify-content:center;height:100vh;width:100vw}
+  canvas{image-rendering:pixelated;width:min(100vw,177.78vh);height:min(56.25vw,100vh);background:#1a0e08}
 </style>
 </head>
 <body>
 <div id="wrap"><canvas id="game" width="640" height="360"></canvas></div>
 <script>
-// ============ PERCUSSIONISTA! ============
+// pantalla completa con F (o doble clic)
+function goFull(){
+  const el=document.documentElement;
+  if(document.fullscreenElement){ document.exitFullscreen(); }
+  else if(el.requestFullscreen){ el.requestFullscreen(); }
+  else if(el.webkitRequestFullscreen){ el.webkitRequestFullscreen(); }
+}
+addEventListener('keydown',e=>{ if(e.code==='KeyF') goFull(); });
+document.getElementById('wrap').addEventListener('dblclick',goFull);
+// ============ PERCUSIONISTA! ============
 const cv = document.getElementById('game'), ctx = cv.getContext('2d');
 ctx.imageSmoothingEnabled = false;
 const W = 640, H = 360;
 const GRAV = 0.5, MOVE = 2.6;
-// drum upgrade ladder: bigger drum = higher jump
 const JUMPS = [10.5, 11.6, 12.8];
 const DRUM_NAMES = ['CAJÓN', 'NAPO', 'BOMBO'];
 
-// ---------- Audio (chip drums!) ----------
+// ---------- Audio ----------
 let AC = null;
 function ac(){ if(!AC) AC = new (window.AudioContext||window.webkitAudioContext)(); return AC; }
-function noiseBurst(dur, freq, vol){ // cajón / snare hit
+function noiseBurst(dur, freq, vol){
   try{
     const a = ac(), len = a.sampleRate*dur, buf = a.createBuffer(1,len,a.sampleRate), d = buf.getChannelData(0);
     for(let i=0;i<len;i++) d[i]=(Math.random()*2-1)*Math.pow(1-i/len,2);
@@ -46,91 +53,149 @@ function beep(freq,dur,vol,type){
 function sfxJump(){ beep(300,.12,.12,'square'); beep(450,.1,.1,'square'); }
 function sfxStomp(){ noiseBurst(.18, 900, .5); beep(150,.15,.2,'sine'); }
 function sfxHurt(){ noiseBurst(.3, 500, .5); beep(110,.3,.25,'sawtooth'); }
-function sfxCoin(){ beep(880,.08,.15); setTimeout(()=>beep(1320,.15,.15),70); }
+function sfxCoin(){ beep(760,.08,.15); setTimeout(()=>beep(1010,.13,.15),70); }
 function sfxWin(){ [523,659,784,1046].forEach((f,i)=>setTimeout(()=>beep(f,.25,.2),i*180)); }
 
-// festejo: Afro-Peruvian 12/8 groove (sixths of a bar) — used throughout
-let musicOn = true, musicTimer = null, mStep = 0;
-function festejoTick(){
-  if(!musicOn) return;
-  if([0,3,6,8,11].includes(mStep%12)) noiseBurst(.09,800,.25); // cajón groove
-  if(mStep%6===0) noiseBurst(.15,250,.4);                      // bombo boom
-  if([2,5,9].includes(mStep%12)) beep(1046,.09,.12,'square');  // criolla bell
-  const notes=[A5:2, A5:2, G5:2, E5:2, D5:4, E5:2, G5:2, A5:2, ., C6:2, B5:2, A5:2, G5:4, E5:2, G5:2, A5:2, ., E5:2, D5:2, C5:2, D5:4, .:2, A4:2, C5:2, D5:2, E5:2, G5:4, E5:2, D5:2, C5:2, A4:4];
-  if([0,4,7,10].includes(mStep%12)) beep(notes[(mStep/4|0)%4],.18,.07,'triangle');
-  mStep++;
+// ---------- Rhythms ----------
+// cada ritmo: pasos por compás, beats fuertes (para 'C'), tempo ms, voces
+const RHYTHMS = {
+  festejo: { steps:12, tempo:140, onBeat:[0,3,6,8,11],
+    play(s){ if([0,3,6,8,11].includes(s)) noiseBurst(.09,800,.25);
+      if(s%6===0) noiseBurst(.15,250,.4);
+      if([2,5,9].includes(s)) beep(1046,.09,.12,'square');
+      const n=[523,587,659,784,880];
+      if([0,4,7,10].includes(s)) beep(n[(s/4|0)%4],.18,.07,'triangle'); } },
+  huayno: { steps:8, tempo:120, onBeat:[0,2,4,6],
+    play(s){ if(s%2===0) noiseBurst(.07,1000,.3);
+      if(s===0) beep(659,.12,.15,'square');
+      if(s===4) noiseBurst(.12,300,.35);
+      // melodía huayño estilo charango (original, al estilo de 'De la nada')
+      const mel=[659,784,880,784,659,587,523,587,659,784,880,988,880,784,659,587];
+      if(s%2===1) beep(mel[(mBar*4+(s-1)/2)%16],.14,.1,'triangle');
+      if(s===7) beep(mel[(mBar*4+3)%16]/2,.16,.08,'square'); } },
+  cumbia: { steps:8, tempo:135, onBeat:[0,2,4,6],
+    play(s){ if(s%2===0) noiseBurst(.06,1200,.22);
+      if(s===0||s===6) noiseBurst(.12,260,.38);
+      if(s===3||s===7) beep(1319,.05,.08,'square');
+      // riff psicodélico (al estilo Los Mirlos, original)
+      const riff=[880,830,740,830,988,880,740,698];
+      if(s%2===1) beep(riff[(mBar*4+(s-1)/2)%8],.16,.09,'sawtooth');
+      if(s===0) beep(riff[(mBar*4)%8]/2,.2,.1,'triangle'); } },
+};
+
+// ---------- Level themes ----------
+const THEMES = {
+  barranco: { sky:['#2c4a7c','#b56b4a','#e8a05c'], sun:'#ffe9b0', mtn1:'#6b4a63', mtn2:'#8a5f6e',
+    bldgs:['#c9564a','#d99e4a','#7a9e7e','#4a7a9e','#b07a9e'], roof:'#8a3a30',
+    ground:['#9e6b3f','#c9915a','#6e4426'], brick:['#a8632f','#d08a4a','#7a4520'],
+    plat:['#4a8a6e','#6eb892'], crate:['#8a5a2a','#c9914a'], win:'#d94141' },
+  cusco: { sky:['#1a2a5e','#4a5a9e','#c98a6a'], sun:'#e8d8b0', mtn1:'#4a4a7e', mtn2:'#6e6e9e',
+    bldgs:['#b05a3a','#c98a4a','#8a6a5a','#a84a5a','#7a8a6a'], roof:'#5a3a2a',
+    ground:['#8a8a96','#b8b8c2','#5a5a68'], brick:['#7a7a8e','#a8a8ba','#4a4a5e'],
+    plat:['#6e8a4a','#9eb87a'], crate:['#6e5a3a','#b09a6a'], win:'#d94141' },
+  selva: { sky:['#1a3a2a','#3a7a4a','#a8d05a'], sun:'#d8ff90', mtn1:'#1e5a3a', mtn2:'#2a7a4e',
+    bldgs:['#4a8a5a','#6e9e4a','#8a7a3a','#3a7a6e','#5a9e6e'], roof:'#3a5a2a',
+    ground:['#6e4a2a','#8a6a3a','#4a2e14'], brick:['#5a7a3a','#8aa855','#3a5a24'],
+    plat:['#2a8a6e','#4ab892'], crate:['#5a6e2a','#a8c04a'], win:'#d94141' },
+};
+
+// ---------- LEVELS (¡solo datos!) ----------
+// tiles: G suelo, B ladrillo, P plataforma, S cajón de madera, D bloque de tambor
+function buildMap(spec){
+  const m=[]; const MW=220, MH=18;
+  for(let x=0;x<MW;x++){ m[x]=[]; for(let y=0;y<MH;y++) m[x][y]=' '; }
+  const rect=(x0,y0,x1,y1,t)=>{ for(let x=x0;x<x1;x++) for(let y=y0;y<y1;y++) if(m[x]) m[x][y]=t; };
+  // suelo (con huecos opcionales)
+  if(!spec.pits) rect(0,15,MW,18,'G');
+  else { let x=0; for(const [gap0,gap1] of spec.pits.concat([[999,999]])){ rect(x,15,Math.min(gap0,MW),18,'G'); x=gap1; } }
+  for(const r of spec.rects) rect(r[0],r[1],r[2],r[3],r[4]);
+  for(const [x,y] of spec.drums) m[x][y]='D';
+  m.copRows = spec.copRows||[];
+  return m;
 }
-function startMusic(){ if(musicTimer) return; musicTimer = setInterval(festejoTick, 140); }
-function stopMusic(){ clearInterval(musicTimer); musicTimer=null; }
-
-// ---------- Level ----------
-// tiles: G ground, B brick, P platform, S crate, D drum block (bump!), U used block
-const MAPW = 220, MAPH = 18, TS = 20;
-const map = [];
-for(let x=0;x<MAPW;x++){ map[x]=[]; for(let y=0;y<MAPH;y++) map[x][y]=' '; }
-for(let x=0;x<MAPW;x++) for(let y=15;y<MAPH;y++) map[x][y]='G';
-function rect(x0,y0,x1,y1,t){ for(let x=x0;x<x1;x++) for(let y=y0;y<y1;y++) if(map[x]) map[x][y]=t; }
-// ground variation
-rect(40,13,44,15,'G'); rect(60,12,63,15,'G'); rect(90,13,93,15,'G');
-rect(120,11,126,15,'G'); rect(150,13,154,15,'G'); rect(175,12,180,15,'G');
-// bricks & platforms
-rect(10,11,14,12,'B'); rect(24,9,28,10,'B'); rect(50,10,55,11,'B');
-rect(70,8,75,9,'P'); rect(84,11,88,12,'B'); rect(100,9,104,10,'P');
-rect(112,12,116,13,'B'); rect(132,8,140,9,'P'); rect(144,12,148,13,'B');
-rect(160,9,164,10,'B'); rect(185,10,192,11,'P'); rect(200,11,205,12,'B');
-// drum blocks (bump from below to pop out drum sticks!)
-[[15,11],[27,9],[53,10],[73,8],[86,11],[102,9],[114,12],[135,8],[146,12],[162,9],[187,10],[202,11],[64,12],[96,12],[140,12],[177,11]]
-  .forEach(([x,y])=>map[x][y]='D');
-// crates
-rect(36,14,38,15,'S'); rect(105,14,107,15,'S'); rect(168,14,170,15,'S');
-// coins
-const coins=[];
-function coin(x,y){ coins.push({x:x*TS+6,y:y*TS+4,got:false,bob:Math.random()*6}); }
-for(let x=11;x<14;x++) coin(x,10);
-for(let x=25;x<28;x++) coin(x,8);
-for(let x=51;x<55;x++) coin(x,9);
-for(let x=71;x<75;x++) coin(x,7);
-for(let x=101;x<104;x++) coin(x,8);
-for(let x=133;x<140;x++) coin(x,7);
-for(let x=161;x<164;x++) coin(x,8);
-for(let x=186;x<192;x++) coin(x,9);
-for(let x=45;x<48;x++) coin(x,12);
-for(let x=155;x<158;x++) coin(x,12);
-
-// enemies (police) — patrol between bounds
-const cops=[
-  {x:30,y:13.4,dir:1,min:26,max:38},
-  {x:56,y:13.4,dir:-1,min:50,max:62},
-  {x:78,y:13.4,dir:1,min:70,max:88},
-  {x:96,y:13.4,dir:-1,min:92,max:106},
-  {x:116,y:13.4,dir:1,min:110,max:124},
-  {x:138,y:13.4,dir:-1,min:130,min2:0,max:146},
-  {x:158,y:13.4,dir:1,min:152,max:166},
-  {x:184,y:13.4,dir:-1,min:178,max:196},
-  {x:200,y:13.4,dir:1,min:196,max:210},
+const LEVELS = [
+  { name:'BARRANCO', theme:'barranco', rhythm:'festejo', copSpeed:0.9, map: buildMap({
+      rects:[[10,11,14,12,'B'],[24,9,28,10,'B'],[50,10,55,11,'B'],[70,8,75,9,'P'],[84,11,88,12,'B'],
+             [100,9,104,10,'P'],[112,12,116,13,'B'],[132,8,140,9,'P'],[144,12,148,13,'B'],[160,9,164,10,'B'],
+             [185,10,192,11,'P'],[200,11,205,12,'B'],[40,13,44,15,'G'],[60,12,63,15,'G'],[90,13,93,15,'G'],
+             [120,11,126,15,'G'],[150,13,154,15,'G'],[175,12,180,15,'G'],[36,14,38,15,'S'],[105,14,107,15,'S'],[168,14,170,15,'S']],
+      drums:[[15,11],[27,9],[53,10],[73,8],[86,11],[102,9],[114,12],[135,8],[146,12],[162,9],[187,10],[202,11],[64,12],[96,12],[140,12],[177,11]],
+      copRows:[[30,26,38],[56,50,62],[78,70,88],[96,92,106],[116,110,124],[138,130,146],[158,152,166],[184,178,196],[200,196,210]],
+    })},
+  { name:'CUSCO', theme:'cusco', rhythm:'huayno', copSpeed:1.1, map: buildMap({
+      pits:[[44,47],[88,91],[130,133],[172,176],[198,200]],
+      rects:[[10,11,14,12,'B'],[22,8,26,9,'B'],[34,12,38,13,'B'],[50,10,55,11,'B'],[62,7,68,8,'P'],
+             [74,11,78,12,'B'],[94,9,98,10,'P'],[106,12,110,13,'B'],[118,7,126,8,'P'],[136,11,141,12,'B'],
+             [150,8,156,9,'P'],[162,12,166,13,'B'],[180,9,188,10,'P'],[192,12,196,13,'B'],[206,10,212,11,'B'],
+             [30,13,34,15,'G'],[96,13,100,15,'G'],[160,13,164,15,'G'],[24,14,26,15,'S'],[152,14,154,15,'S'],[204,14,206,15,'S']],
+      drums:[[12,11],[24,8],[36,12],[52,10],[64,7],[76,11],[96,9],[108,12],[120,7],[138,11],[152,8],[164,12],[182,9],[194,12],[208,10],[94,13]],
+      copRows:[[20,16,28],[36,32,42],[54,48,60],[76,72,84],[92,90,100],[110,106,118],[124,120,128],[140,136,148],[156,150,162],[178,174,186],[194,190,204]],
+    })},
+  { name:'SELVA', theme:'selva', rhythm:'cumbia', copSpeed:1.25, map: buildMap({
+      pits:[[26,29],[58,61],[82,84],[112,116],[142,145],[168,171],[190,193],[206,208]],
+      rects:[[8,12,12,13,'B'],[16,9,20,10,'P'],[30,11,34,12,'B'],[38,8,44,9,'P'],[48,12,52,13,'B'],
+             [62,10,66,11,'P'],[70,7,76,8,'P'],[86,11,90,12,'B'],[98,9,104,10,'P'],[118,10,122,11,'P'],
+             [126,7,132,8,'P'],[146,11,150,12,'B'],[154,9,158,10,'P'],[172,12,176,13,'B'],[182,8,188,9,'P'],
+             [196,11,200,12,'B'],[210,9,216,10,'P'],[40,14,42,15,'S'],[124,14,126,15,'S'],[186,14,188,15,'S']],
+      drums:[[10,12],[18,9],[32,11],[40,8],[50,12],[64,10],[72,7],[88,11],[100,9],[120,10],[128,7],[148,11],[156,9],[174,12],[184,8],[198,11],[212,9]],
+      copRows:[[14,10,22],[34,30,42],[52,48,58],[68,64,78],[88,84,94],[102,98,110],[122,118,130],[134,130,140],[152,148,160],[174,170,180],[184,180,196],[198,194,204]],
+    })},
 ];
-cops.forEach(c=>{ c.px=c.x*TS; c.py=c.y*TS; c.w=18;c.h=26; c.stunned=0; c.alive=true; c.vy=0; });
+LEVELS.forEach(L=>{
+  L.cops = L.map.copRows.map(r=>({x:r[0],dir:1,min:r[1],max:r[2]}));
+  L.coins = [];
+  // monedas: sobre bloques de tambor y plataformas
+  for(let x=0;x<220;x++) for(let y=0;y<18;y++){
+    const t=L.map[x][y];
+    if((t==='B'||t==='P'||t==='D') && y<14 && L.map[x][y-1]===' ' && (x+y)%2===0) L.coins.push({x:x*20+6,y:(y-1)*20+4,got:false,bob:Math.random()*6});
+  }
+  L.GOAL_X = 208*20;
+});
 
-// ---------- Drum sticks (pop out of drum blocks) ----------
-const sticks=[]; // {x,y,vy,settled}
-const darts=[];  // thrown sticks {x,y,vx,vy}
+// ---------- Drum sticks & player ----------
+const sticks=[], darts=[];
 const P = { x:40, y:200, vx:0, vy:0, w:14, h:22, onG:false, face:1, lives:3, inv:0, anim:0, drumming:0, drumLv:0, stickCount:0, throwCd:0 };
-
-
+let map=[], coins=[], cops=[];
+let LV=0; // índice de nivel actual
+let unlocked = 1;
+try{ unlocked = Math.max(1, parseInt(window.localStorage.getItem('perc_unlock')||'1')); }catch(e){}
 
 // ---------- State ----------
-let state='title'; // title | play | dead | win
-let score=0, camX=0, t=0, flash=0, msg='', msgT=0;
-const GOAL_X = (MAPW-4)*TS;
-
+let state='select'; // select | play | dead | win | finale
+let score=0, camX=0, t=0, flash=0, msg='', msgT=0, sel=0;
 const keys={};
 addEventListener('keydown',e=>{
   keys[e.code]=true;
   if(['ArrowLeft','ArrowRight','ArrowUp','Space'].includes(e.code)) e.preventDefault();
-  if(state==='title' && (e.code==='Space'||e.code==='Enter')) startGame();
-  else if((state==='dead'||state==='win') && (e.code==='Space'||e.code==='Enter')) startGame();
+  if(state==='select'){
+    if(e.code==='ArrowLeft'||e.code==='KeyA'){ sel=(sel+LEVELS.length-1)%LEVELS.length; sfxJump(); }
+    if(e.code==='ArrowRight'||e.code==='KeyD'){ sel=(sel+1)%LEVELS.length; sfxJump(); }
+    if((e.code==='Space'||e.code==='Enter') && sel<unlocked){ startLevel(sel); }
+  }
+  else if((state==='dead') && (e.code==='Space'||e.code==='Enter')) state='select';
+  else if(state==='win' && (e.code==='Space'||e.code==='Enter')){
+    if(LV+1<LEVELS.length){ unlocked=Math.max(unlocked,LV+2); try{window.localStorage.setItem('perc_unlock',unlocked);}catch(e){} state='select'; sel=LV+1; }
+    else { unlocked=LEVELS.length; try{window.localStorage.setItem('perc_unlock',unlocked);}catch(e){} state='select'; }
+  }
   if(state==='play' && e.code==='KeyX') throwStick();
+  if(state==='play' && (e.code==='KeyC'||e.code==='KeyZ')) playDrum();
 });
+addEventListener('keyup',e=>keys[e.code]=false);
+cv.addEventListener('pointerdown',()=>{ if(state==='select'&&sel<unlocked) startLevel(sel); if(state==='dead'||state==='win') state='select'; });
+
+function startLevel(i){
+  LV=i; const L=LEVELS[i];
+  map=L.map; coins=L.coins; cops=L.cops;
+  ac(); startMusic(L.rhythm);
+  P.x=40; P.y=180; P.vx=0; P.vy=0; P.lives=3; P.inv=60;
+  P.drumLv=0; P.stickCount=0; P.throwCd=0;
+  score=0; camX=0; groove=0;
+  darts.length=0; sticks.length=0;
+  coins.forEach(c=>c.got=false);
+  for(let x=0;x<220;x++) for(let y=0;y<18;y++) if(map[x][y]==='U') map[x][y]='D';
+  cops.forEach(c=>{ c.px=c.x*20; c.py=13.4*20; c.w=18;c.h=26; c.alive=true; c.stunned=0; c.dir=Math.random()<.5?1:-1; c.vy=0; });
+  state='play';
+}
 
 function throwStick(){
   if(P.drumLv<2 || P.stickCount<=0 || P.throwCd>0) return;
@@ -138,44 +203,51 @@ function throwStick(){
   darts.push({x:P.x+P.w/2+(P.face>0?8:-12), y:P.y+6, vx:P.face*7, vy:-3});
   noiseBurst(.1,1400,.4);
 }
-addEventListener('keyup',e=>keys[e.code]=false);
-cv.addEventListener('pointerdown',()=>{ if(state!=='play') startGame(); });
-
-function startGame(){
-  ac(); startMusic();
-  P.x=40; P.y=180; P.vx=0; P.vy=0; P.lives=3; P.inv=60;
-  P.drumLv=0; P.stickCount=0; P.throwCd=0;
-  score=0; camX=0;
-  darts.length=0;
-  coins.forEach(c=>c.got=false);
-  sticks.length=0;
-  // reset drum blocks
-  for(let x=0;x<MAPW;x++) for(let y=0;y<MAPH;y++) if(map[x][y]==='U') map[x][y]='D';
-  cops.forEach(c=>{ c.px=c.x*TS; c.py=c.y*TS; c.alive=true; c.stunned=0; c.dir=Math.random()<.5?1:-1; c.vy=0; });
-  state='play';
+let groove=0, grooveBest=0;
+function playDrum(){
+  P.drumming=14;
+  const R=RHYTHMS[LEVELS[LV].rhythm], hit=mStep%R.steps;
+  const onBeat=R.onBeat.includes(hit);
+  if(P.drumLv===2){ noiseBurst(.22,220,.55); beep(90,.18,.3,'sine'); }
+  else if(P.drumLv===1){ noiseBurst(.14,420,.4); beep(140,.1,.15,'sine'); }
+  else { noiseBurst(.09,800,.35); }
+  if(onBeat){
+    groove++; if(groove>grooveBest) grooveBest=groove;
+    score+=50; msg='¡EN RITMO! ×'+groove; msgT=50;
+    beep(groove>=5?1568:1046,.08,.15,'square');
+  } else { groove=0; score+=10; noiseBurst(.05,300,.15); }
 }
 
+// ---------- Music engine (per-rhythm) ----------
+let musicOn = true, musicTimer = null, mStep = 0, mBar = 0, curRhythm = 'festejo';
+function musicTick(){
+  if(!musicOn) return;
+  RHYTHMS[curRhythm].play(mStep);
+  mStep++;
+  if(mStep % RHYTHMS[curRhythm].steps === 0) mBar++;
+}
+function startMusic(r){ curRhythm=r||curRhythm; if(musicTimer){ clearInterval(musicTimer); } musicTimer=setInterval(musicTick, RHYTHMS[curRhythm].tempo); }
+function stopMusic(){ clearInterval(musicTimer); musicTimer=null; }
+
 function solid(tx,ty){
-  if(tx<0||tx>=MAPW) return true;
-  if(ty>=MAPH) return false;
-  if(ty<0) return false;
+  if(tx<0||tx>=220) return true;
+  if(ty>=18||ty<0) return false;
   const c=map[tx][ty];
   return c==='G'||c==='B'||c==='P'||c==='S'||c==='D'||c==='U';
 }
-
-const bumps=[]; // block bounce animations {tx,ty,timer}
+const bumps=[];
 function bumpDrumBlocks(rising){
   if(!rising) return;
-  const ty=Math.floor(P.y/TS)-1;   // the tile ABOVE the (snapped) head = the block we bonked
-  if(ty<0||ty>=MAPH) return;
+  const ty=Math.floor(P.y/20)-1;
+  if(ty<0||ty>=18) return;
   const hits=[];
-  for(const tx of [Math.floor((P.x+3)/TS), Math.floor((P.x+P.w-3)/TS)]){
-    if(tx>=0&&tx<MAPW&&map[tx][ty]==='D') hits.push([tx,ty]);
+  for(const tx of [Math.floor((P.x+3)/20), Math.floor((P.x+P.w-3)/20)]){
+    if(tx>=0&&tx<220&&map[tx][ty]==='D') hits.push([tx,ty]);
   }
   for(const [tx,ty2] of hits){
     map[tx][ty2]='U';
     bumps.push({tx,ty:ty2,timer:12});
-    sticks.push({x:tx*TS+4, y:(ty2-1)*TS+2, vy:-5, vx:(tx%2?2.4:-2.4), settled:false});
+    sticks.push({x:tx*20+4, y:(ty2-1)*20+2, vy:-5, vx:(tx%2?2.4:-2.4), settled:false});
     score+=20; sfxStomp(); P.drumming=14;
   }
 }
@@ -183,7 +255,6 @@ function bumpDrumBlocks(rising){
 function update(){
   t++;
   if(state!=='play'){ return; }
-  // input
   let ax=0;
   if(keys.ArrowLeft||keys.KeyA) ax=-1;
   if(keys.ArrowRight||keys.KeyD) ax=1;
@@ -191,56 +262,44 @@ function update(){
   if(ax) P.face=ax;
   if((keys.ArrowUp||keys.Space||keys.KeyW) && P.onG){ P.vy=-JUMPS[P.drumLv]; P.onG=false; sfxJump(); P.drumming=14; }
   P.vy += GRAV; if(P.vy>12) P.vy=12;
-
-  // move X with collision
   P.x += P.vx;
   if(P.x<0) P.x=0;
   if(P.vx>0){
-    if(solid(Math.floor((P.x+P.w)/TS), Math.floor((P.y+4)/TS)) || solid(Math.floor((P.x+P.w)/TS), Math.floor((P.y+P.h-4)/TS))){
-      P.x = Math.floor((P.x+P.w)/TS)*TS - P.w - 0.1; P.vx=0;
+    if(solid(Math.floor((P.x+P.w)/20), Math.floor((P.y+4)/20)) || solid(Math.floor((P.x+P.w)/20), Math.floor((P.y+P.h-4)/20))){
+      P.x = Math.floor((P.x+P.w)/20)*20 - P.w - 0.1; P.vx=0;
     }
   } else if(P.vx<0){
-    if(solid(Math.floor(P.x/TS), Math.floor((P.y+4)/TS)) || solid(Math.floor(P.x/TS), Math.floor((P.y+P.h-4)/TS))){
-      P.x = (Math.floor(P.x/TS)+1)*TS + 0.1; P.vx=0;
+    if(solid(Math.floor(P.x/20), Math.floor((P.y+4)/20)) || solid(Math.floor(P.x/20), Math.floor((P.y+P.h-4)/20))){
+      P.x = (Math.floor(P.x/20)+1)*20 + 0.1; P.vx=0;
     }
   }
-  // move Y with collision
-  const rising = P.vy < 0;   // remember BEFORE we zero it
+  const rising = P.vy < 0;
   P.y += P.vy; P.onG=false;
   if(P.vy>=0){
-    if(solid(Math.floor((P.x+3)/TS), Math.floor((P.y+P.h)/TS)) || solid(Math.floor((P.x+P.w-3)/TS), Math.floor((P.y+P.h)/TS))){
-      P.y = Math.floor((P.y+P.h)/TS)*TS - P.h; P.vy=0; P.onG=true;
+    if(solid(Math.floor((P.x+3)/20), Math.floor((P.y+P.h)/20)) || solid(Math.floor((P.x+P.w-3)/20), Math.floor((P.y+P.h)/20))){
+      P.y = Math.floor((P.y+P.h)/20)*20 - P.h; P.vy=0; P.onG=true;
     }
   } else {
-    if(solid(Math.floor((P.x+3)/TS), Math.floor(P.y/TS)) || solid(Math.floor((P.x+P.w-3)/TS), Math.floor(P.y/TS))){
-      P.y = (Math.floor(P.y/TS)+1)*TS + 0.1; P.vy=0;
+    if(solid(Math.floor((P.x+3)/20), Math.floor(P.y/20)) || solid(Math.floor((P.x+P.w-3)/20), Math.floor(P.y/20))){
+      P.y = (Math.floor(P.y/20)+1)*20 + 0.1; P.vy=0;
       bumpDrumBlocks(rising);
     }
   }
   if(P.y>H+60) hurt(true);
-
-  // coins
   for(const c of coins){
     c.bob+=0.1;
-    if(!c.got && Math.abs(c.x+7-(P.x+P.w/2))<14 && Math.abs(c.y+8-(P.y+P.h/2))<18){
-      c.got=true; score+=10; sfxCoin();
-    }
+    if(!c.got && Math.abs(c.x+7-(P.x+P.w/2))<14 && Math.abs(c.y+8-(P.y+P.h/2))<18){ c.got=true; score+=10; sfxCoin(); }
   }
-
-  // drum block bounce animations
   for(let i=bumps.length-1;i>=0;i--){ if(--bumps[i].timer<=0) bumps.splice(i,1); }
-
-  // drum sticks fall & get collected
   for(let i=sticks.length-1;i>=0;i--){
     const s=sticks[i];
     if(!s.settled){
-      s.x += s.vx||0;
-      s.y+=s.vy; s.vy+=0.3;
-      const tx=Math.floor((s.x+5)/TS), ty=Math.floor((s.y+14)/TS);
-      if(ty<MAPH && solid(tx,ty)){ s.y=ty*TS-14; s.vy=0; s.settled=true; }
-    }if(Math.abs(s.x+5-(P.x+P.w/2))<14 && Math.abs(s.y+7-(P.y+P.h/2))<18){
+      s.x += s.vx||0; s.y+=s.vy; s.vy+=0.3;
+      const tx=Math.floor((s.x+5)/20), ty=Math.floor((s.y+14)/20);
+      if(ty<18 && solid(tx,ty)){ s.y=ty*20-14; s.vy=0; s.settled=true; }
+    }
+    if(Math.abs(s.x+5-(P.x+P.w/2))<14 && Math.abs(s.y+7-(P.y+P.h/2))<18){
       sticks.splice(i,1); P.stickCount++; sfxCoin(); beep(660,.15,.15);
-      // upgrade: 2 sticks -> lv1, 5 total -> lv2
       if((P.drumLv===0&&P.stickCount>=2)||(P.drumLv===1&&P.stickCount>=5)){
         P.drumLv++; sfxWin(); msg='¡MEJORASTE EL TAMBOR: '+DRUM_NAMES[P.drumLv]+'!'; msgT=120;
       }
@@ -248,57 +307,42 @@ function update(){
     }
   }
   if(msgT>0) msgT--;
-
-  // thrown sticks
   for(let i=darts.length-1;i>=0;i--){
     const d=darts[i];
     d.x+=d.vx; d.y+=d.vy; d.vy+=0.25;
-    if(Math.random()<.5) noiseBurst(.03,2000,.05); // whizz
     let gone = d.x<camX-40 || d.x>camX+W+40 || d.y>H+40;
-    if(!gone && solid(Math.floor((d.x+2)/TS), Math.floor(d.y/TS))){ gone=true; noiseBurst(.06,900,.2); }
-    // hits cops
+    if(!gone && solid(Math.floor((d.x+2)/20), Math.floor(d.y/20))){ gone=true; noiseBurst(.06,900,.2); }
     if(!gone) for(const c of cops){
       if(c.alive && Math.abs(c.px-d.x)<16 && Math.abs(c.py+13-d.y)<26){
-        c.alive=false; c.vy=-5; gone=true; score+=80; sfxStomp(); P.drumming=10;
-        break;
+        c.alive=false; c.vy=-5; gone=true; score+=80; sfxStomp(); P.drumming=10; break;
       }
     }
     if(gone) darts.splice(i,1);
   }
   if(P.throwCd>0) P.throwCd--;
+  const spd = LEVELS[LV].copSpeed;
   for(const c of cops){
-    if(!c.alive){
-      // knocked out: little hop, then fall off screen
-      c.vy += GRAV; c.py += c.vy;
-      continue;
-    }
+    if(!c.alive){ c.vy += GRAV; c.py += c.vy; continue; }
     if(c.stunned>0){ c.stunned--; continue; }
-    c.px += c.dir*0.9;
-    if(c.px/TS < c.min || c.px/TS > c.max) c.dir*=-1;
-    // collision with player
+    c.px += c.dir*spd;
+    if(c.px/20 < c.min || c.px/20 > c.max) c.dir*=-1;
     if(Math.abs(c.px-(P.x+P.w/2))<16 && Math.abs(c.py-(P.y+P.h/2))<22){
-      if(P.vy>1 && P.y < c.py-6){
-        c.stunned=90; c.alive=false; c.vy=-6; P.vy=-8; score+=50; sfxStomp();
-      } else if(P.inv<=0){
-        hurt();
-      }
+      if(P.vy>1 && P.y < c.py-6){ c.stunned=90; c.alive=false; c.vy=-6; P.vy=-8; score+=50; sfxStomp(); }
+      else if(P.inv<=0) hurt();
     }
   }
-
   if(P.inv>0) P.inv--;
   if(P.drumming>0) P.drumming--;
   if(flash>0) flash--;
-
-  // camera
-  camX = Math.max(0, Math.min(P.x - W/2 + 40, MAPW*TS - W));
-
-  // goal — festejo orchestra waits here
-  if(P.x > GOAL_X){ state='win'; sfxWin(); }
+  camX = Math.max(0, Math.min(P.x - W/2 + 40, 220*20 - W));
+  if(P.x > LEVELS[LV].GOAL_X){
+    if(LV+1<LEVELS.length){ unlocked=Math.max(unlocked,LV+2); try{window.localStorage.setItem('perc_unlock',unlocked);}catch(e){} state='win'; }
+    else { unlocked=LEVELS.length; try{window.localStorage.setItem('perc_unlock',unlocked);}catch(e){} state='finale'; }
+    sfxWin(); stopMusic();
+  }
 }
-
 function hurt(pit){
   if(P.inv>0 && !pit) return;
-  // big bombo absorbs one hit (drops a level)
   if(!pit && P.drumLv>=2){ P.drumLv=1; P.inv=90; flash=10; sfxStomp(); msg='¡TU BOMBO SE ROMPIÓ!'; msgT=100; return; }
   P.lives--; P.inv=90; flash=15; sfxHurt();
   if(P.lives<=0){ state='dead'; stopMusic(); }
@@ -306,222 +350,224 @@ function hurt(pit){
   else { P.x=Math.max(40,P.x-80); P.y=100; P.vy=0; }
 }
 
-// ---------- Drawing (pixel art) ----------
+// ---------- Dibujo ----------
 function px(x,y,w,h,col){ ctx.fillStyle=col; ctx.fillRect(Math.round(x),Math.round(y),w,h); }
-
+function theme(){ return THEMES[LEVELS[LV].theme]; }
+let bgLv=0;
 function drawBg(){
-  // sky: Andean dusk
+  const th=THEMES[LEVELS[Math.min(LV,LEVELS.length-1)].theme];
   const g=ctx.createLinearGradient(0,0,0,H);
-  g.addColorStop(0,'#2c4a7c'); g.addColorStop(.55,'#b56b4a'); g.addColorStop(1,'#e8a05c');
+  g.addColorStop(0,th.sky[0]); g.addColorStop(.55,th.sky[1]); g.addColorStop(1,th.sky[2]);
   ctx.fillStyle=g; ctx.fillRect(0,0,W,H);
-  // sun
-  px(W-120-camX*0.05%60, 40, 34, 34, '#ffe9b0');
-  // mountains (parallax)
-  ctx.fillStyle='#6b4a63';
+  px(W-120-camX*0.05%60, 40, 34, 34, th.sun);
+  ctx.fillStyle=th.mtn1;
   for(let i=0;i<8;i++){
     const mx=((i*160 - camX*0.25)%(W+320)+W+320)%(W+320)-160;
     ctx.beginPath(); ctx.moveTo(mx-80,240); ctx.lineTo(mx,110); ctx.lineTo(mx+80,240); ctx.fill();
   }
-  ctx.fillStyle='#8a5f6e';
+  ctx.fillStyle=th.mtn2;
   for(let i=0;i<8;i++){
     const mx=((i*140+70 - camX*0.45)%(W+280)+W+280)%(W+280)-140;
     ctx.beginPath(); ctx.moveTo(mx-70,250); ctx.lineTo(mx,150); ctx.lineTo(mx+70,250); ctx.fill();
   }
-  // colonial buildings (parallax)
   for(let i=0;i<40;i++){
     const bx=(i*90 - camX*0.7); if(bx<-120||bx>W+20) continue;
-    const bh=70+((i*37)%60), colr=['#c9564a','#d99e4a','#7a9e7e','#4a7a9e','#b07a9e'][i%5];
+    const bh=70+((i*37)%60), colr=th.bldgs[i%5];
     px(bx, 240-bh, 70, bh, colr);
-    px(bx, 240-bh, 70, 8, '#8a3a30');
+    px(bx, 240-bh, 70, 8, th.roof);
     for(let wy=0; wy<bh-20; wy+=18) for(let wx=0; wx<60; wx+=22)
       px(bx+8+wx, 252-bh+wy, 12, 10, '#2c2c3a');
-    px(bx+26,240-bh+20,14,16,'#3a2c20'); // door
+    px(bx+26,240-bh+20,14,16,'#3a2c20');
   }
 }
-
 function drawTiles(){
-  const x0=Math.floor(camX/TS), x1=x0+Math.ceil(W/TS)+1;
-  for(let x=x0;x<x1;x++) for(let y=0;y<MAPH;y++){
-    if(x<0||x>=MAPW) continue;
+  const th=theme();
+  const x0=Math.floor(camX/20), x1=x0+Math.ceil(W/20)+1;
+  for(let x=x0;x<x1;x++) for(let y=0;y<18;y++){
+    if(x<0||x>=220) continue;
     const c=map[x][y]; if(c===' ') continue;
     const bump=bumps.find(b=>b.tx===x&&b.ty===y);
     const off = bump ? -Math.sin((12-bump.timer)/12*Math.PI)*8 : 0;
-    const sx=x*TS-camX, sy=y*TS+off;
-    if(c==='G'){ px(sx,sy,TS,TS,'#9e6b3f'); px(sx,sy,TS,4,'#c9915a'); px(sx,sy+TS-3,TS,3,'#6e4426');
-      if((x+y)%2===0) px(sx+4,sy+8,3,3,'#7a5230'); }
-    else if(c==='D'){ // drum block: wood with drum head
-      px(sx,sy,TS,TS,'#7a4a22'); px(sx,sy,TS,3,'#a8733a'); px(sx,sy+TS-2,TS,2,'#4a2c10');
+    const sx=x*20-camX, sy=y*20+off;
+    if(c==='G'){ px(sx,sy,20,20,th.ground[0]); px(sx,sy,20,4,th.ground[1]); px(sx,sy+17,20,3,th.ground[2]);
+      if((x+y)%2===0) px(sx+4,sy+8,3,3,th.ground[2]); }
+    else if(c==='D'){ px(sx,sy,20,20,'#7a4a22'); px(sx,sy,20,3,'#a8733a'); px(sx,sy+18,20,2,'#4a2c10');
       px(sx+4,sy+4,12,12,'#e8d8b0'); px(sx+4,sy+4,12,2,'#c9b888');
-      px(sx+7,sy+8,6,3,'#5a3a18'); px(sx+6,sy+7,8,1,'#5a3a18');
-    }
-    else if(c==='U'){ px(sx,sy,TS,TS,'#5a3a1a'); px(sx,sy,TS,3,'#6e4a26'); }
-    else if(c==='B'){ px(sx,sy,TS,TS,'#a8632f'); px(sx,sy,TS,3,'#d08a4a'); px(sx+9,sy+3,2,TS-3,'#7a4520'); }
-    else if(c==='P'){ px(sx,sy,TS,TS,'#4a8a6e'); px(sx,sy,TS,4,'#6eb892'); }
-    else if(c==='S'){ px(sx,sy,TS,TS,'#8a5a2a'); px(sx+2,sy+2,TS-4,TS-4,'#c9914a'); px(sx,sy+8,TS,3,'#5a3a18'); }
+      px(sx+7,sy+8,6,3,'#5a3a18'); px(sx+6,sy+7,8,1,'#5a3a18'); }
+    else if(c==='U'){ px(sx,sy,20,20,'#5a3a1a'); px(sx,sy,20,3,'#6e4a26'); }
+    else if(c==='B'){ px(sx,sy,20,20,th.brick[0]); px(sx,sy,20,3,th.brick[1]); px(sx+9,sy+3,2,17,th.brick[2]); }
+    else if(c==='P'){ px(sx,sy,20,20,th.plat[0]); px(sx,sy,20,4,th.plat[1]); }
+    else if(c==='S'){ px(sx,sy,20,20,th.crate[0]); px(sx+2,sy+2,16,16,th.crate[1]); px(sx,sy+8,20,3,th.crate[0]); }
   }
 }
-
 function drawCoins(){
   for(const c of coins){
     if(c.got) continue;
     const sx=c.x-camX, sy=c.y+Math.sin(c.bob)*2;
     if(sx<-20||sx>W) continue;
-    px(sx+4,sy,8,12,'#e8c040'); px(sx+6,sy+2,4,8,'#ffe980'); px(sx+4,sy,8,3,'#fff4c0');
+    // alfajor: dos galletas doradas con dulce de leche
+    px(sx+2,sy+8,12,4,'#c9914a');
+    px(sx+2,sy+5,12,3,'#e8d8b8');
+    px(sx+3,sy+3,10,2,'#a86a32');
+    px(sx+2,sy,12,3,'#e8d8b8');
+    px(sx+3,sy-2,10,2,'#c9914a');
+    px(sx+4,sy+5,8,1,'#8a5a2a');
   }
 }
-
-function drawStick(s){
+function drawAji(s){
   const sx=s.x-camX, sy=s.y;
   if(sx<-20||sx>W) return;
-  px(sx+4,sy,3,12,'#c98a4a');   // stick shaft
-  px(sx+3,sy,5,4,'#e8c040');    // tip
+  // ají amarillo
+  px(sx+3,sy+2,8,10,'#e8b020');
+  px(sx+2,sy+3,2,7,'#d89a10');
+  px(sx+4,sy+3,6,7,'#ffc830');
+  px(sx+5,sy,2,3,'#3a7a2a');
 }
-
 function drawDrummer(x,y,face,anim,onG,drumming){
-  // body: PURPLE poncho player
-  px(x,y+4,14,14,'#7a3a9e');            // poncho
-  px(x,y+4,14,3,'#e8d040');             // poncho stripe
+  px(x,y+4,14,14,'#7a3a9e');
+  px(x,y+4,14,3,'#e8d040');
   px(x+2,y+6,10,3,'#e8d040');
-  px(x+3,y,8,6,'#e8b088');              // head
-  px(x+3+(face>0?3:0),y+2,2,2,'#2c1a0a'); // eye
-  px(x+1,y-2,11,3,'#1a1a1a');           // black hat brim
-  px(x+3,y-5,7,4,'#1a1a1a');            // black hat crown
+  px(x+3,y,8,6,'#e8b088');
+  px(x+3+(face>0?3:0),y+2,2,2,'#2c1a0a');
+  px(x+1,y-2,11,3,'#1a1a1a');
+  px(x+3,y-5,7,4,'#1a1a1a');
   px(x+4,y-6,5,1,'#2c2c2c');
-  // legs
   const walk = onG&&Math.abs(P.vx)>0 ? Math.sin(anim*0.3)*3 : 0;
   px(x+2,y+18,4,4+(walk>0?2:0),'#3a2c1a');
   px(x+8,y+18,4,4+(walk<0?2:0),'#3a2c1a');
-  // drum strapped — grows with level!
   const dx = face>0 ? 10 : -P.drumLv*3-4;
   const dw = 8 + P.drumLv*4, dh = 9 + P.drumLv*2;
   px(x+dx,y+12-dh+9,dw,dh,'#7a4a22');
   px(x+dx,y+12-dh+9,dw,2,'#a86a32');
-  if(P.drumLv>=2){ px(x+dx+1,y+12-dh+12,dw-2,dh-5,'#e8d8b0'); } // bombo head
-  if(drumming>0){ // drum-hit sparkle
-    px(x+(face>0?dw+9:-9),y+6,3,3,'#ffe980');
-    noiseBurst(.05,600,.05);
-  }
+  if(P.drumLv>=2) px(x+dx+1,y+12-dh+12,dw-2,dh-5,'#e8d8b0');
+  if(drumming>0){ px(x+(face>0?dw+9:-9),y+6,3,3,'#ffe980'); }
 }
-
 function drawCop(c){
-  if(!c.alive && c.py>H+40) return; // fell off screen already
+  if(!c.alive && c.py>H+40) return;
   const sx=c.px-camX-9, sy=c.py;
   if(sx<-30||sx>W+30) return;
-  if(!c.alive){ // knocked out, spinning as it falls
+  if(!c.alive){
     ctx.save(); ctx.translate(sx+9, sy+26); ctx.rotate(t*0.2); ctx.translate(-9,-26);
     px(0,4,18,14,'#2c3e6e'); px(4,0,10,6,'#e8b088'); px(0,0,18,4,'#1a2a4e');
     ctx.restore(); return;
   }
   const bob = Math.sin(t*0.15)*1;
-  px(sx,sy+4+bob,18,15,'#2c3e6e');       // uniform
-  px(sx,sy+4+bob,18,3,'#1a2a4e');
-  px(sx+2,sy+7+bob,14,2,'#e8d040');      // badge stripe
-  px(sx+5,sy-1+bob,9,6,'#e8b088');       // head
-  px(sx+3,sy-3+bob,13,3,'#1a2a4e');      // cap
-  px(sx+7,sy-6+bob,6,3,'#1a2a4e');       // cap peak
+  px(sx,sy+4+bob,18,15,'#2c3e6e'); px(sx,sy+4+bob,18,3,'#1a2a4e');
+  px(sx+2,sy+7+bob,14,2,'#e8d040'); px(sx+5,sy-1+bob,9,6,'#e8b088');
+  px(sx+3,sy-3+bob,13,3,'#1a2a4e'); px(sx+7,sy-6+bob,6,3,'#1a2a4e');
   px(sx+9,sy+1+bob,2,2,'#2c1a0a');
-  px(sx+3,sy+19+bob,5,7,'#1a2a4e');      // legs
-  px(sx+10,sy+19+bob,5,7,'#1a2a4e');
-  px(sx+11,sy+8+bob,7,3,'#333');         // baton arm
+  px(sx+3,sy+19+bob,5,7,'#1a2a4e'); px(sx+10,sy+19+bob,5,7,'#1a2a4e');
+  px(sx+11,sy+8+bob,7,3,'#333');
   if(c.stunned>0){ px(sx+2,sy-8,4,4,'#ffe980'); px(sx+12,sy-8,4,4,'#ffe980'); }
 }
-
 function drawDart(d){
   const sx=d.x-camX, sy=d.y;
   if(sx<-20||sx>W+20) return;
-  px(sx,sy,6,3,'#c98a4a'); px(sx+(P.face>0?6:0),sy,3,3,'#e8c040');
+  // ají volador
+  px(sx,sy,8,4,'#e8b020'); px(sx+2,sy-1,5,2,'#ffc830'); px(sx+(P.face>0?8:-2),sy-2,2,3,'#3a7a2a');
 }
-
 function drawOrchestra(){
-  // festejo orchestra at the end: cajón, guitar, quijada players
-  const bx=GOAL_X-camX+60;
+  const bx=LEVELS[LV].GOAL_X-camX+60;
   if(bx<-200||bx>W+220) return;
-  const gy=270;
-  const wave=Math.sin(t*0.12);
-  // cajón player
+  const gy=270, wave=Math.sin(t*0.12);
   px(bx,gy-6,16,6,'#8a5a2a'); px(bx,gy-16+wave,10,10,'#e8b088'); px(bx-2,gy-19+wave,14,3,'#1a1a1a');
   px(bx+8,gy-12,8,7,'#b04ad9');
-  // guitar player
   px(bx+34,gy-8,16,8,'#7a3a9e'); px(bx+40,gy-18+wave,10,10,'#e8b088'); px(bx+38,gy-21+wave,14,3,'#1a1a1a');
   px(bx+30,gy-14,26,4,'#c9914a'); px(bx+48,gy-16,8,8,'#e8c040');
-  // quijada (donkey jaw) player + cajita
   px(bx+70,gy-7,16,7,'#d94141'); px(bx+76,gy-17+wave,10,10,'#8a5a3a'); px(bx+74,gy-20+wave,14,3,'#1a1a1a');
   px(bx+64,gy-14,10,5,'#e8d8b0');
-  // banner
-  px(bx-6,gy-58,110,14,'#d94141');
+  px(bx-6,gy-58,110,14,theme().win);
   ctx.fillStyle='#fff'; ctx.font='bold 10px monospace'; ctx.fillText('FIESTA!', bx+18, gy-48);
 }
-
 function drawGoal(){
-  const sx=GOAL_X-camX;
+  const sx=LEVELS[LV].GOAL_X-camX;
   if(sx<-60||sx>W+60) return;
-  // giant bombo + flag = goal
   px(sx-10,270,40,30,'#8a5a2a'); px(sx-10,270,40,6,'#a86a32');
   px(sx-4,276,28,18,'#c9914a');
   px(sx+30,190,3,110,'#6e4426');
-  px(sx+33,190,34,22,'#d94141'); px(sx+33,196,34,4,'#ffffff');
+  px(sx+33,190,34,22,theme().win); px(sx+33,196,34,4,'#ffffff');
   ctx.fillStyle='#fff'; ctx.font='10px monospace'; ctx.fillText('META', sx+38, 205);
 }
-
 function drawHUD(){
   ctx.fillStyle='rgba(0,0,0,0.45)'; ctx.fillRect(0,0,W,28);
   ctx.fillStyle='#ffe9b0'; ctx.font='bold 14px monospace';
   ctx.fillText('PUNTOS '+score, 12, 19);
-  // hearts
-  for(let i=0;i<P.lives;i++){
-    px(W-30-i*20, 8, 12, 11, '#d94141');
-    px(W-27-i*20, 5, 6, 4, '#d94141');
-  }
-  // drum sticks + drum level meter
-  px(W-150,6,4,12,'#c98a4a'); px(W-151,6,6,3,'#e8c040');
-  ctx.fillStyle='#ffe9b0'; ctx.fillText('×'+P.stickCount, W-142, 18);
+  ctx.fillStyle='#8a9ec9'; ctx.font='bold 11px monospace';
+  ctx.fillText(LEVELS[LV].name, 140, 19);
+  if(groove>0){ ctx.fillStyle='#e8c040'; ctx.fillText('¡RITMO ×'+groove+'!', 12, 38); }
+  for(let i=0;i<P.lives;i++){ px(W-30-i*20, 8, 12, 11, '#d94141'); px(W-27-i*20, 5, 6, 4, '#d94141'); }
+  px(W-150,6,8,4,'#e8b020'); px(W-148,4,4,3,'#ffc830'); px(W-146,3,2,3,'#3a7a2a');
+  ctx.fillStyle='#ffe9b0'; ctx.font='bold 14px monospace'; ctx.fillText('×'+P.stickCount, W-138, 18);
   ctx.fillStyle='#e8c040'; ctx.fillText(DRUM_NAMES[P.drumLv], W-100, 18);
-  if(msgT>0){ center(msg, 44, '#ffe980', 'bold 16px'); }
+  if(msgT>0) center(msg, 44, '#ffe980', 'bold 16px');
 }
-
 function center(text,y,col,size){
   ctx.fillStyle=col||'#fff'; ctx.font=(size||'bold 20px')+' monospace';
-  ctx.textAlign='center';
-  ctx.fillText(text, W/2, y);
-  ctx.textAlign='left';
+  ctx.textAlign='center'; ctx.fillText(text, W/2, y); ctx.textAlign='left';
 }
-
+function drawLevelCard(x,y,i,locked,active){
+  const L=LEVELS[i], th=THEMES[L.theme];
+  px(x,y,150,110, locked?'#2a2a34':'#3a3040');
+  px(x,y,150,4,locked?'#444':th.sky[0]);
+  if(!locked){
+    // mini preview: sky + mountains + ground
+    px(x+8,y+12,134,26,th.sky[1]); px(x+8,y+30,134,8,th.sky[2]);
+    px(x+8,y+38,134,10,th.ground[0]);
+    px(x+20,y+26,14,14,th.bldgs[0]); px(x+50,y+22,14,18,th.bldgs[1]); px(x+90,y+26,14,14,th.bldgs[2]);
+  }
+  ctx.fillStyle=locked?'#666':'#ffe9b0'; ctx.font='bold 12px monospace'; ctx.textAlign='center';
+  ctx.fillText(locked?'???':L.name, x+75, y+66); ctx.textAlign='left';
+  ctx.fillStyle=locked?'#555':'#e8b088'; ctx.font='10px monospace'; ctx.textAlign='center';
+  ctx.fillText(locked?'BLOQUEADA':'RITMO: '+L.rhythm.toUpperCase(), x+75, y+84); ctx.textAlign='left';
+  if(active){ px(x-3,y-3,156,3,'#e8c040'); px(x-3,y+110,156,3,'#e8c040'); px(x-3,y,3,110,'#e8c040'); px(x+150,y,3,110,'#e8c040'); }
+}
+function drawSelect(){
+  const g=ctx.createLinearGradient(0,0,0,H);
+  g.addColorStop(0,'#1a0e28'); g.addColorStop(1,'#3a1a2e');
+  ctx.fillStyle=g; ctx.fillRect(0,0,W,H);
+  center('PERCUSIONISTA!', 60, '#e8c040', 'bold 30px');
+  center('ELIGE TU CALLE', 88, '#fff', '16px');
+  const startX = W/2 - (LEVELS.length*170-20)/2;
+  for(let i=0;i<LEVELS.length;i++)
+    drawLevelCard(startX+i*170, 110, i, i>=unlocked, i===sel);
+  center('← → elegir    ESPACIO tocar', 260, '#fff', '14px');
+  if(sel>=unlocked) center('¡Completa la calle anterior para desbloquear!', 284, '#d94141', '13px');
+  else center('Calle: '+LEVELS[sel].name, 284, '#e8c040', 'bold 14px');
+  center('Mejor racha de ritmo: ×'+grooveBest, 308, '#e8b088', '12px');
+  center('C = tocar tambor · X = lanzar ají (con BOMBO)', 330, '#8a9ec9', '11px');
+}
 function draw(){
-  drawBg(); drawTiles(); drawCoins(); for(const s of sticks) drawStick(s); for(const d of darts) drawDart(d); drawGoal(); drawOrchestra();
+  if(state==='select'){ drawSelect(); return; }
+  drawBg(); drawTiles(); drawCoins();
+  for(const s of sticks) drawAji(s);
+  for(const d of darts) drawDart(d);
+  drawGoal(); drawOrchestra();
   for(const c of cops) drawCop(c);
-  if(state==='play'||state==='dead') drawDrummer(P.x-camX, P.y, P.face, P.anim, P.onG, P.drumming);
+  if(state==='play'||state==='dead'||state==='win'||state==='finale') drawDrummer(P.x-camX, P.y, P.face, P.anim, P.onG, P.drumming);
   if(flash>0){ ctx.fillStyle='rgba(255,80,80,'+(flash/40)+')'; ctx.fillRect(0,0,W,H); }
   drawHUD();
-
-  if(state==='title'){
-    ctx.fillStyle='rgba(10,5,20,0.72)'; ctx.fillRect(0,0,W,H);
-    center('PERCUSIONISTA!', 92, '#e8c040', 'bold 34px');
-    center('Tambores Callejeros del Perú', 118, '#fff', '16px');
-    center('Tocas cajón en la esquina.', 160, '#e8b088', '14px');
-    center('La policía te quiere FUERA.', 178, '#e8b088', '14px');
-    center('← → mover   ↑ / ESPACIO saltar', 210, '#fff', '14px');
-    center('¡Golpea los BLOQUES DE TAMBOR por abajo para sacar baquetas!', 244, '#e8c040', '14px');
-    center('Junta baquetas para mejorar: CAJÓN → NAPO → BOMBO.', 260, '#fff', '13px');
-    center('Con el BOMBO, aprieta X para lanzar baquetas a los policías!', 276, '#e8b088', '13px');
-    center('¡Llega a la orquesta de festejo al final!', 292, '#e8c040', '13px');
-    center('APRIETA ESPACIO PARA JUGAR', 310, '#e8c040', 'bold 18px');
-  }
   if(state==='dead'){
     ctx.fillStyle='rgba(10,5,20,0.72)'; ctx.fillRect(0,0,W,H);
-    center('CONCHA TU MARE!!!', 150, '#d94141', 'bold 26px');
+    center('¿QUÉ HACES, CONCHA TU MARE!', 150, '#d94141', 'bold 26px');
     center('Puntos: '+score, 185, '#fff', '18px');
-    center('APRIETA ESPACIO PARA INTENTAR OTRA VEZ', 225, '#e8c040', 'bold 16px');
+    center('APRIETA ESPACIO PARA VOLVER', 225, '#e8c040', 'bold 16px');
   }
   if(state==='win'){
     ctx.fillStyle='rgba(10,5,20,0.72)'; ctx.fillRect(0,0,W,H);
-    center('EL RITMO NO SE DETIENE!', 140, '#e8c040', 'bold 26px');
-    center('¡Llegaste a tu orquesta!', 168, '#fff', '16px');
-    center('Te estaban esperando para tocar. ¡FIESTA!', 186, '#e8b088', '14px');
-    center('Puntos finales: '+score, 200, '#fff', '18px');
-    center('APRIETA ESPACIO PARA JUGAR OTRA VEZ', 240, '#e8c040', 'bold 16px');
+    center('¡CALLE COMPLETADA!', 140, '#e8c040', 'bold 26px');
+    center('La orquesta de '+LEVELS[LV].name+' te aplaude.', 170, '#fff', '16px');
+    center('Puntos: '+score, 192, '#fff', '18px');
+    center('APRIETA ESPACIO — NUEVA CALLE DESBLOQUEADA: '+LEVELS[LV+1].name, 230, '#e8c040', 'bold 15px');
+  }
+  if(state==='finale'){
+    ctx.fillStyle='rgba(10,5,20,0.72)'; ctx.fillRect(0,0,W,H);
+    center('¡FIESTA TOTAL!', 130, '#e8c040', 'bold 30px');
+    center('Tocaste en TODAS las calles del Perú.', 166, '#fff', '15px');
+    center('festejo · huayño · landó — el ritmo no se detiene.', 186, '#e8b088', '14px');
+    center('Puntos finales: '+score, 206, '#fff', '18px');
+    center('APRIETA ESPACIO PARA VOLVER', 244, '#e8c040', 'bold 16px');
   }
 }
-
 function loop(){ update(); draw(); P.anim++; requestAnimationFrame(loop); }
 loop();
 </script>
