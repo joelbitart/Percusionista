@@ -114,7 +114,8 @@ function buildMap(spec){
   return m;
 }
 const LEVELS = [
-  { name:'BARRANCO', theme:'barranco', rhythm:'festejo', copSpeed:0.9, map: buildMap({
+  { name:'BARRANCO', theme:'barranco', rhythm:'festejo', copSpeed:0.9,
+    boss:{name:'EL SARGENTO', hp:3, trigger:178*20}, map: buildMap({
       rects:[[10,11,14,12,'B'],[24,9,28,10,'B'],[50,10,55,11,'B'],[70,8,75,9,'P'],[84,11,88,12,'B'],
              [100,9,104,10,'P'],[112,12,116,13,'B'],[132,8,140,9,'P'],[144,12,148,13,'B'],[160,9,164,10,'B'],
              [185,10,192,11,'P'],[200,11,205,12,'B'],[40,13,44,15,'G'],[60,12,63,15,'G'],[90,13,93,15,'G'],
@@ -122,7 +123,8 @@ const LEVELS = [
       drums:[[15,11],[27,9],[53,10],[73,8],[86,11],[102,9],[114,12],[135,8],[146,12],[162,9],[187,10],[202,11],[64,12],[96,12],[140,12],[177,11]],
       copRows:[[30,26,38],[56,50,62],[78,70,88],[96,92,106],[116,110,124],[138,130,146],[158,152,166],[184,178,196],[200,196,210]],
     })},
-  { name:'CUSCO', theme:'cusco', rhythm:'huayno', copSpeed:1.1, map: buildMap({
+  { name:'CUSCO', theme:'cusco', rhythm:'huayno', copSpeed:1.1,
+    boss:{name:'EL COMANDANTE', hp:4, trigger:178*20, type:'noise'}, map: buildMap({
       pits:[[44,47],[88,91],[130,133],[172,176],[198,200]],
       rects:[[10,11,14,12,'B'],[22,8,26,9,'B'],[34,12,38,13,'B'],[50,10,55,11,'B'],[62,7,68,8,'P'],
              [74,11,78,12,'B'],[94,9,98,10,'P'],[106,12,110,13,'B'],[118,7,126,8,'P'],[136,11,141,12,'B'],
@@ -131,7 +133,8 @@ const LEVELS = [
       drums:[[12,11],[24,8],[36,12],[52,10],[64,7],[76,11],[96,9],[108,12],[120,7],[138,11],[152,8],[164,12],[182,9],[194,12],[208,10],[94,13]],
       copRows:[[20,16,28],[36,32,42],[54,48,60],[76,72,84],[92,90,100],[110,106,118],[124,120,128],[140,136,148],[156,150,162],[178,174,186],[194,190,204]],
     })},
-  { name:'SELVA', theme:'selva', rhythm:'cumbia', copSpeed:1.25, map: buildMap({
+  { name:'SELVA', theme:'selva', rhythm:'cumbia', copSpeed:1.25,
+    boss:{name:'LA CAPITANA', hp:4, trigger:176*20, type:'waves'}, map: buildMap({
       pits:[[26,29],[58,61],[82,84],[112,116],[142,145],[168,171],[190,193],[206,208]],
       rects:[[8,12,12,13,'B'],[16,9,20,10,'P'],[30,11,34,12,'B'],[38,8,44,9,'P'],[48,12,52,13,'B'],
              [62,10,66,11,'P'],[70,7,76,8,'P'],[86,11,90,12,'B'],[98,9,104,10,'P'],[118,10,122,11,'P'],
@@ -153,9 +156,10 @@ LEVELS.forEach(L=>{
 });
 
 // ---------- Drum sticks & player ----------
-const sticks=[], darts=[];
+const sticks=[], darts=[], bossShots=[], batons=[];
 const P = { x:40, y:200, vx:0, vy:0, w:14, h:22, onG:false, face:1, lives:3, inv:0, anim:0, drumming:0, drumLv:0, stickCount:0, throwCd:0 };
 let map=[], coins=[], cops=[];
+let boss=null, bossDied=false;
 let LV=0; // índice de nivel actual
 let unlocked = 1;
 try{ unlocked = Math.max(1, parseInt(window.localStorage.getItem('perc_unlock')||'1')); }catch(e){}
@@ -190,7 +194,8 @@ function startLevel(i){
   P.x=40; P.y=180; P.vx=0; P.vy=0; P.lives=3; P.inv=60;
   P.drumLv=0; P.stickCount=0; P.throwCd=0;
   score=0; camX=0; groove=0;
-  darts.length=0; sticks.length=0;
+  boss=null; bossDied=false;
+  darts.length=0; sticks.length=0; bossShots.length=0; batons.length=0;
   coins.forEach(c=>c.got=false);
   for(let x=0;x<220;x++) for(let y=0;y<18;y++) if(map[x][y]==='U') map[x][y]='D';
   cops.forEach(c=>{ c.px=c.x*20; c.py=13.4*20; c.w=18;c.h=26; c.alive=true; c.stunned=0; c.dir=Math.random()<.5?1:-1; c.vy=0; });
@@ -215,7 +220,11 @@ function playDrum(){
     groove++; if(groove>grooveBest) grooveBest=groove;
     score+=50; msg='¡EN RITMO! ×'+groove; msgT=50;
     beep(groove>=5?1568:1046,.08,.15,'square');
-  } else { groove=0; score+=10; noiseBurst(.05,300,.15); }
+    if(boss && boss.type==='noise' && boss.st!=='stun') boss.noise=Math.max(0,boss.noise-8); // buen ritmo lo calma
+  } else {
+    groove=0; score+=10; noiseBurst(.05,300,.15);
+    if(boss && boss.type==='noise' && boss.st==='idle') boss.noise=Math.min(110,boss.noise+14); // ¡rumor de queja!
+  }
 }
 
 // ---------- Music engine (per-rhythm) ----------
@@ -288,7 +297,8 @@ function update(){
   if(P.y>H+60) hurt(true);
   for(const c of coins){
     c.bob+=0.1;
-    if(!c.got && Math.abs(c.x+7-(P.x+P.w/2))<14 && Math.abs(c.y+8-(P.y+P.h/2))<18){ c.got=true; score+=10; sfxCoin(); }
+    if(!c.got && Math.abs(c.x+7-(P.x+P.w/2))<14 && Math.abs(c.y+8-(P.y+P.h/2))<18){ c.got=true; score+=10; sfxCoin();
+      const Rn=RHYTHMS[curRhythm]; if(boss&&boss.type==='noise'&&boss.st==='idle'&&!Rn.onBeat.includes(mStep%Rn.steps)){ boss.noise=Math.min(110,boss.noise+12); msg='¡MUY RUIDOSO!'; msgT=40; } }
   }
   for(let i=bumps.length-1;i>=0;i--){ if(--bumps[i].timer<=0) bumps.splice(i,1); }
   for(let i=sticks.length-1;i>=0;i--){
@@ -331,11 +341,105 @@ function update(){
       else if(P.inv<=0) hurt();
     }
   }
+  // ---- JEFE: El Sargento ----
+  const BL=LEVELS[LV];
+  if(!boss && BL.boss && !bossDied && P.x>BL.boss.trigger){
+    boss={name:BL.boss.name, hp:BL.boss.hp, maxHp:BL.boss.hp, type:BL.boss.type||'dash', x:Math.min(BL.boss.trigger+520, BL.GOAL_X-160), y:15*20-62, w:44, h:62, vx:0, vy:0, st:'idle', t:0, dir:-1, flash:0, beeped:0, noise:0, waveN:0};
+    msg='¡'+boss.name+'!'; msgT=90; sfxHurt();
+  }
+  if(boss){
+    boss.flash=Math.max(0,boss.flash-1);
+    boss.t++;
+    const bDist=P.x-boss.x;
+    if(boss.type==='waves'){
+      // LA CAPITANA: se planta, silba y lanza ondas; a veces suelta bastones
+      boss.vx=0; boss.dir=bDist>0?1:-1;
+      if(boss.st==='idle'){
+        if(boss.t===40||boss.t===70){ beep(1400,.08,.25,'square'); }
+        if(boss.t===50 || boss.t===80 || boss.t===110){
+          bossShots.push({x:boss.x-20, y:14*20-14, vx:-(3.2+boss.waveN*0.5)}); beep(1800,.12,.2,'square'); boss.waveN++;
+        }
+        if(boss.t===150 && boss.waveN>=2){ batons.push({x:P.x+80+Math.random()*60, y:-20, vy:1, rot:0}); }
+        if(boss.t>=170){ boss.st='tired'; boss.t=0; boss.waveN=0; }
+      } else if(boss.st==='tired'){
+        if(boss.t>=80){ boss.st='idle'; boss.t=0; }
+      } else if(boss.st==='stun'){
+        if(boss.t>=70){ boss.st='idle'; boss.t=0; }
+      }
+      // ondas: solo dañan a la altura del pecho; saltar las esquiva
+      for(let i=bossShots.length-1;i>=0;i--){
+        const s=bossShots[i]; s.x+=s.vx;
+        if(s.x<camX-40) bossShots.splice(i,1);
+        else if(Math.abs(s.x-(P.x+P.w/2))<14 && Math.abs(s.y-(P.y+P.h/2))<16 && P.inv<=0){ hurt(); bossShots.splice(i,1); }
+      }
+      for(let i=batons.length-1;i>=0;i--){
+        const bt=batons[i]; bt.vy+=0.28; bt.y+=bt.vy; bt.rot+=0.3;
+        const tx=Math.floor((bt.x+3)/20), ty=Math.floor((bt.y+8)/20);
+        let gone=bt.y>H+30 || (ty<18 && solid(tx,ty));
+        if(gone){ batons.splice(i,1); noiseBurst(.06,900,.2); }
+        else if(Math.abs(bt.x-(P.x+P.w/2))<14 && Math.abs(bt.y+6-(P.y+P.h/2))<18 && P.inv<=0){ hurt(); batons.splice(i,1); }
+      }
+      boss.x=Math.max(BL.boss.trigger-40, Math.min(boss.x, BL.GOAL_X-120));
+    }
+    else if(boss.type==='noise'){
+      // EL COMANDANTE: medidor de ruido — tambeat fuera de ritmo lo llena; a 100 ataca con onda de silbato
+      boss.vx=0; boss.dir=bDist>0?1:-1;
+      if(boss.st==='idle'){
+        if(boss.t>50 && boss.t%40===0){ beep(1600,.06,.2,'square'); } // silba molesto
+        if(boss.noise>=100){ boss.st='attack'; boss.t=0; noiseBurst(.4,300,.5); boss.vx=0; }
+      } else if(boss.st==='attack'){
+        if(boss.t===1) bossShots.push({x:boss.x-24, y:14*20-10, vx:-5});
+        if(boss.t===30) bossShots.push({x:boss.x-24, y:13*20-6, vx:-4.5});
+        if(boss.t>=90){ boss.st='tired'; boss.t=0; boss.noise=0; }
+      } else if(boss.st==='tired'){
+        if(boss.t>=70){ boss.st='idle'; boss.t=0; }
+      } else if(boss.st==='stun'){
+        if(boss.t>=70){ boss.st='idle'; boss.t=0; }
+      }
+      for(let i=bossShots.length-1;i>=0;i--){
+        const s=bossShots[i]; s.x+=s.vx;
+        if(s.x<camX-40) bossShots.splice(i,1);
+        else if(Math.abs(s.x-(P.x+P.w/2))<14 && Math.abs(s.y-(P.y+P.h/2))<16 && P.inv<=0){ hurt(); bossShots.splice(i,1); }
+      }
+      boss.x=Math.max(BL.boss.trigger-40, Math.min(boss.x, BL.GOAL_X-120));
+    }
+    else { // type 'dash' — El Sargento
+      if(boss.st==='idle'){
+        boss.vx=0; boss.dir=bDist>0?1:-1;
+        if(boss.t===60||boss.t===100){ beep(1400,.08,.25,'square'); boss.beeped++; } // silbato: ¡aviso!
+        if(boss.t>=150){ boss.st='dash'; boss.t=0; boss.vx=boss.dir*6.5; noiseBurst(.3,600,.4); }
+      } else if(boss.st==='dash'){
+        boss.x+=boss.vx;
+        if(boss.t>75){ boss.st='tired'; boss.t=0; }
+      } else if(boss.st==='tired'){
+        boss.vx=0;
+        if(boss.t>=50){ boss.st='idle'; boss.t=0; boss.beeped=0; }
+      } else if(boss.st==='stun'){
+        boss.vx=0;
+        if(boss.t>=70){ boss.st='idle'; boss.t=0; }
+      }
+    }
+    boss.x=Math.max(BL.boss.trigger-100, Math.min(boss.x, BL.GOAL_X-60));
+    const bx=boss.x-boss.w/2, by=boss.y;
+    const nearX=Math.abs(boss.x-(P.x+P.w/2))<34;
+    const stompHit = nearX && P.vy>1 && P.y+P.h < by+30; // caes sobre la cabeza
+    const touchHit = nearX && Math.abs(by+31-(P.y+P.h/2))<48;
+    if(stompHit && boss.st!=='stun'){
+        boss.hp--; boss.flash=14; P.vy=-9; boss.st='stun'; boss.t=0; score+=100; sfxStomp(); noiseBurst(.25,500,.5);
+        if(boss.type==='noise'){ const Rn=RHYTHMS[curRhythm]; if(!Rn.onBeat.includes(mStep%Rn.steps)) boss.noise=Math.min(110,boss.noise+10); else boss.noise=Math.max(0,boss.noise-8); }
+        msg=boss.hp>0 ? '¡PISADO! QUEDAN '+boss.hp : ''; msgT=60;
+        if(boss.hp<=0){
+          bossDied=true; boss=null; score+=1000; sfxWin();
+          msg='¡'+BL.boss.name+' DERROTADO!'; msgT=150; flash=20;
+        }
+    } else if(touchHit && P.inv<=0 && boss.st!=='stun') hurt();
+  }
   if(P.inv>0) P.inv--;
   if(P.drumming>0) P.drumming--;
   if(flash>0) flash--;
   camX = Math.max(0, Math.min(P.x - W/2 + 40, 220*20 - W));
-  if(P.x > LEVELS[LV].GOAL_X){
+  if(boss && P.x > BL.GOAL_X-90) P.x=BL.GOAL_X-90; // pared del estadio
+  if(P.x > LEVELS[LV].GOAL_X || (LEVELS[LV].boss && bossDied)){
     if(LV+1<LEVELS.length){ unlocked=Math.max(unlocked,LV+2); try{window.localStorage.setItem('perc_unlock',unlocked);}catch(e){} state='win'; }
     else { unlocked=LEVELS.length; try{window.localStorage.setItem('perc_unlock',unlocked);}catch(e){} state='finale'; }
     sfxWin(); stopMusic();
@@ -460,11 +564,79 @@ function drawCop(c){
   px(sx+11,sy+8+bob,7,3,'#333');
   if(c.stunned>0){ px(sx+2,sy-8,4,4,'#ffe980'); px(sx+12,sy-8,4,4,'#ffe980'); }
 }
+function drawBoss(b){
+  const sx=b.x-camX-b.w/2, sy=b.y;
+  const bob=Math.sin(t*0.12)*1.5, sh=b.st==='dash'?2:0;
+  const colr=b.flash>0 ? '#fff' : (b.type==='waves'?'#7a4a6e':b.type==='noise'?'#4a3a5e':'#5a6ea8');
+  if(b.type==='waves'){
+    // LA CAPITANA: alta, delgada, melena
+    px(sx+8,sy+16+bob,30,36,colr); px(sx+8,sy+16+bob,30,4,'#4a2a4e');
+    px(sx+13,sy+24+bob,20,4,'#e8d040'); px(sx+20,sy+24+bob,8,4,'#1a2a4e');
+    px(sx+12,sy-4+bob,20,18,'#f0c8a0');
+    px(sx+10,sy-10+bob,24,8,'#2c1a3e'); px(sx+9,sy-4+bob,3,16,'#2c1a3e'); px(sx+30,sy-4+bob,3,16,'#2c1a3e'); // melena
+    px(sx+12,sy-14+bob,20,5,'#3a2a5e'); px(sx+24,sy-16+bob,8,4,'#3a2a5e'); // gorra
+    px(sx+14,sy+2+bob,3,3,'#2c1a0a'); px(sx+24,sy+2+bob,3,3,'#2c1a0a');
+    px(sx+5,sy+52+bob,9,8,'#1a0e2e'); px(sx+29,sy+52+bob,9,8,'#1a0e2e');
+    if(b.st==='idle'){ ctx.fillStyle='#ff9be0'; ctx.font='bold 14px monospace'; ctx.fillText(b.t%30<15?'¡PIII!':'¡PIII PIII!', sx-8, sy-26); }
+  } else if(b.type==='noise'){
+    // EL COMANDANTE: regordete con radio y bigote enorme
+    px(sx+4,sy+12+bob,38,42,colr); px(sx+4,sy+12+bob,38,4,'#2e2444');
+    px(sx+2,sy+26+bob,8,10,'#8a8a96'); px(sx+34,sy+22+bob,8,8,'#8a8a96'); // radio al hombro
+    px(sx+12,sy-6+bob,20,16,'#e8b088');
+    px(sx+10,sy-11+bob,24,7,'#221a3e'); px(sx+14,sy-17+bob,16,6,'#221a3e');
+    px(sx+24,sy-15+bob,5,3,'#e8d040');
+    px(sx+12,sy+3+bob,18,5,'#3a2a10'); // bigote gordo
+    px(sx+13,sy-1+bob,3,3,'#000'); px(sx+26,sy-1+bob,3,3,'#000');
+    px(sx+8,sy+54+bob,10,8,'#221a3e'); px(sx+28,sy+54+bob,10,8,'#221a3e');
+    if(b.st==='idle'){ ctx.fillStyle='#b8e0ff'; ctx.font='bold 12px monospace'; ctx.fillText('¡SILENCIO!', sx-10, sy-24); }
+  } else {
+    px(sx,sy+14+bob,44,40,colr); px(sx,sy+14+bob,44,4,'#3a4a7e');
+    px(sx+6,sy+24+bob,32,4,'#e8d040'); px(sx+16,sy+24+bob,10,4,'#1a2a4e');
+    px(sx+10,sy-6+bob,24,18,'#e8b088');
+    px(sx+12,sy-9+bob,22,5,'#2c3e6e'); px(sx+16,sy-14+bob,14,5,'#2c3e6e');
+    px(sx+24,sy-13+bob,4,3,'#e8d040');
+    px(sx+14,sy+2+bob,3,3,'#2c1a0a'); px(sx+24,sy+2+bob,3,3,'#2c1a0a');
+    px(sx+16,sy+7+bob,12,3,'#5a3a20');
+    px(sx+6,sy+54+bob,10,8,'#1a2a4e'); px(sx+28,sy+54+bob,10,8,'#1a2a4e');
+    if(b.st==='dash'){ px(sx+(b.dir>0?-6:42), sy+20, 4, 20, '#ffe980'); }
+    if(b.st==='idle' && b.t>=60){ ctx.fillStyle='#ffe980'; ctx.font='bold 16px monospace'; ctx.fillText('¡PÍO PÍO!', sx-14, sy-24); }
+  }
+  if(b.st==='tired'){ ctx.fillStyle='#fff'; ctx.font='bold 11px monospace'; ctx.fillText('jaa… jaa…', sx-4, sy-20); }
+  if(b.st==='stun'){ ctx.fillStyle='#aef'; ctx.font='bold 11px monospace'; ctx.fillText('¡AY!', sx+10, sy-22); }
+  // barra de vida
+  ctx.fillStyle='rgba(0,0,0,0.55)'; ctx.fillRect(W/2-92, 40, 184, 16);
+  ctx.fillStyle='#d94141'; ctx.fillRect(W/2-90, 42, Math.max(0,180*b.hp/b.maxHp), 12);
+  const hint=b.type==='waves'?'ESQUIVA SUS ONDAS, PIÉSALO ×'+b.maxHp : b.type==='noise'?'TOCA EN RITMO O PIÉSALO ×'+b.maxHp : 'PIÉSALO ×'+b.maxHp;
+  ctx.fillStyle='#ffe9b0'; ctx.font='bold 10px monospace'; ctx.fillText(b.name+' — '+hint, W/2-86, 51);
+  // medidor de ruido (solo El Comandante)
+  if(b.type==='noise'){
+    ctx.fillStyle='rgba(0,0,0,0.55)'; ctx.fillRect(W/2-92, 58, 184, 10);
+    ctx.fillStyle=b.noise>=80?'#ff6040':'#4ac0d9'; ctx.fillRect(W/2-90, 60, Math.min(180,b.noise*1.8), 6);
+    ctx.fillStyle='#cfeaff'; ctx.font='bold 8px monospace'; ctx.fillText('QUEJA DE RUIDO', W/2-88, 66);
+  }
+}
 function drawDart(d){
   const sx=d.x-camX, sy=d.y;
   if(sx<-20||sx>W+20) return;
   // ají volador
   px(sx,sy,8,4,'#e8b020'); px(sx+2,sy-1,5,2,'#ffc830'); px(sx+(P.face>0?8:-2),sy-2,2,3,'#3a7a2a');
+}
+function drawBossShots(){
+  for(const s of bossShots){
+    const sx=s.x-camX; if(sx<-30||sx>W+30) continue;
+    // onda de silbato: anillos concéntricos
+    const r=(t%12)/12*10;
+    ctx.strokeStyle='#cfeaff'; ctx.lineWidth=2;
+    ctx.beginPath(); ctx.arc(sx, s.y+7, 6+r, 0, Math.PI*2); ctx.stroke();
+    ctx.strokeStyle='#ffe980';
+    ctx.beginPath(); ctx.arc(sx, s.y+7, 3, 0, Math.PI*2); ctx.stroke();
+  }
+  for(const bt of batons){
+    const sx=bt.x-camX; if(sx<-30||sx>W+30) continue;
+    ctx.save(); ctx.translate(sx+3, bt.y); ctx.rotate(bt.rot);
+    px(-2,-10,4,20,'#8a5a2a'); px(-2,-10,4,4,'#d94141');
+    ctx.restore();
+  }
 }
 function drawOrchestra(){
   const bx=LEVELS[LV].GOAL_X-camX+60;
@@ -542,6 +714,8 @@ function draw(){
   for(const s of sticks) drawAji(s);
   for(const d of darts) drawDart(d);
   drawGoal(); drawOrchestra();
+  if(boss) drawBoss(boss);
+  drawBossShots();
   for(const c of cops) drawCop(c);
   if(state==='play'||state==='dead'||state==='win'||state==='finale') drawDrummer(P.x-camX, P.y, P.face, P.anim, P.onG, P.drumming);
   if(flash>0){ ctx.fillStyle='rgba(255,80,80,'+(flash/40)+')'; ctx.fillRect(0,0,W,H); }
