@@ -60,27 +60,28 @@ function sfxWin(){ [523,659,784,1046].forEach((f,i)=>setTimeout(()=>beep(f,.25,.
 // cada ritmo: pasos por compás, beats fuertes (para 'C'), tempo ms, voces
 const RHYTHMS = {
   festejo: { steps:12, tempo:140, onBeat:[0,3,6,8,11],
+    mel:'E5:2 E5:2 G5:2 G5:2 A5:4 C5:2 A5:2 E5 G5 A5:2 . A5 G5 E5:2 D5 E5 D5 C5:2 D5 E5 D5 C5 A4:2 .:2',
     play(s){ if([0,3,6,8,11].includes(s)) noiseBurst(.09,800,.25);
       if(s%6===0) noiseBurst(.15,250,.4);
       if([2,5,9].includes(s)) beep(1046,.09,.12,'square');
-      const n=[523,587,659,784,880];
-      if([0,4,7,10].includes(s)) beep(n[(s/4|0)%4],.18,.07,'triangle'); } },
+      if(s%4===0) beep(131,0.24,.08,'triangle'); } },
   huayno: { steps:8, tempo:120, onBeat:[0,2,4,6],
+    mel:'E5:2 A5:2 C6:2 B5:2 A5:2 E5:2 G5:4 A5:2 G5:2 E5:2 D5:2 C5:2 D5:2 E5:4 .:2 '+
+        'E5:2 A5:2 C6:2 B5:2 A5:2 E5:2 G5:4 A5:2 G5:2 E5:2 D5:2 C5:2 B4:2 A4:4 .:2 '+
+        'C5:2 D5:2 E5:2 G5:2 A5:2 B5:2 C6:4 D6:4 E6:8 D6:2 C6:2 B5:2 A5:2 .:2 '+
+        'G5:2 E5:2 G5:2 A5:2 B5:2 C6:2 B5:2 A5:2 G5:2 E5:2 D5:2 C5:2 A4:4 .:2 A4:2 B4:2 C5:2 D5:2 E5:8 .:4',
     play(s){ if(s%2===0) noiseBurst(.07,1000,.3);
-      if(s===0) beep(659,.12,.15,'square');
       if(s===4) noiseBurst(.12,300,.35);
-      // melodía huayño estilo charango (original, al estilo de 'De la nada')
-      const mel=[659,784,880,784,659,587,523,587,659,784,880,988,880,784,659,587];
-      if(s%2===1) beep(mel[(mBar*4+(s-1)/2)%16],.14,.1,'triangle');
-      if(s===7) beep(mel[(mBar*4+3)%16]/2,.16,.08,'square'); } },
+      if(s===0) beep([220,220,131,131,131,220][mBar%6],.24,.09,'triangle'); } },
   cumbia: { steps:8, tempo:135, onBeat:[0,2,4,6],
+    mel:'A4:2 B4 C5:2 B4 A4:2 G4:2 A4:4 .:2 C5:2 D5 E5:2 D5 C5:2 B4:2 C5:4 .:2 '+
+        'E5:2 G5:2 E5:2 D5:2 C5:2 B4:2 A4:4 B4:2 C5:2 D5:2 E5:2 D5:2 B4:2 G4:2 A4:4 .:2 '+
+        'A4:2 C5:2 E5:2 G5:2 A5:4 G5:2 E5:2 D5:4 C5:2 B4:2 A4:2 G4:2 A4:2 B4:2 C5:2 D5:4 .:2 '+
+        'E5:2 D5 C5:2 B4 A4:2 B4:2 C5:4 B4:2 A4:2 G4:2 A4:2 E4:2 G4:2 A4:4 E5:2 A5:2 .:4',
     play(s){ if(s%2===0) noiseBurst(.06,1200,.22);
       if(s===0||s===6) noiseBurst(.12,260,.38);
       if(s===3||s===7) beep(1319,.05,.08,'square');
-      // riff psicodélico (al estilo Los Mirlos, original)
-      const riff=[880,830,740,830,988,880,740,698];
-      if(s%2===1) beep(riff[(mBar*4+(s-1)/2)%8],.16,.09,'sawtooth');
-      if(s===0) beep(riff[(mBar*4)%8]/2,.2,.1,'triangle'); } },
+      if(s===0) beep([110,110,98,65.4][mBar%4],.3,.11,'triangle'); } },
 };
 
 // ---------- Level themes ----------
@@ -229,13 +230,35 @@ function playDrum(){
 
 // ---------- Music engine (per-rhythm) ----------
 let musicOn = true, musicTimer = null, mStep = 0, mBar = 0, curRhythm = 'festejo';
+// melodía con secuencia: notas tipo 'E5:2', pausas '.' — se repite sin fin
+const NOTE_F={C:261.63,D:293.66,E:329.63,F:349.23,G:392.00,A:440.00,B:493.88};
+function noteHz(n){ const m=n.match(/^([A-G])(#?)(\d)$/); if(!m) return 440; return NOTE_F[m[1]]*Math.pow(2,(m[2]?1:0))*Math.pow(2,m[3]-4); }
+let melSeq=[], melIdx=0, melLeft=0;
+function setMelody(txt){
+  melSeq=[]; melIdx=0; melLeft=0;
+  (txt||'').trim().split(/\s+/).forEach(tok=>{
+    const p=tok.split(':'); const len=Math.max(1, Math.round(parseFloat(p[1]||'1')));
+    if(p[0]==='.'||p[0]==='0'||p[0]==='R') melSeq.push({rest:true,len});
+    else melSeq.push({f:noteHz(p[0]),len});
+  });
+}
+function melodyTick(){
+  if(!melSeq.length) return;
+  if(melLeft<=0){
+    const e=melSeq[melIdx]; melIdx=(melIdx+1)%melSeq.length;
+    if(!e.rest) beep(e.f, RHYTHMS[curRhythm].tempo*e.len/1000*0.95, .12, 'triangle');
+    melLeft=e.len;
+  }
+  melLeft--;
+}
 function musicTick(){
   if(!musicOn) return;
+  melodyTick();
   RHYTHMS[curRhythm].play(mStep);
   mStep++;
   if(mStep % RHYTHMS[curRhythm].steps === 0) mBar++;
 }
-function startMusic(r){ curRhythm=r||curRhythm; if(musicTimer){ clearInterval(musicTimer); } musicTimer=setInterval(musicTick, RHYTHMS[curRhythm].tempo); }
+function startMusic(r){ curRhythm=r||curRhythm; setMelody(RHYTHMS[curRhythm].mel); if(musicTimer){ clearInterval(musicTimer); } musicTimer=setInterval(musicTick, RHYTHMS[curRhythm].tempo); }
 function stopMusic(){ clearInterval(musicTimer); musicTimer=null; }
 
 function solid(tx,ty){
